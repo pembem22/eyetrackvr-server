@@ -6,6 +6,14 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+env_logger = "0.11.1"
 hex-literal = "0.4.1"
+image = "0.24.8"
+imgui = "0.11.0"
+imgui-wgpu = "0.24.0"
+imgui-winit-support = "0.11.0"
+pollster = "0.3.0"
 tokio = { version = "1.35.1", features = ["full"] }
 tokio-serial = "5.4.4"
+wgpu = "0.17.2"
+winit = "0.27.5"
