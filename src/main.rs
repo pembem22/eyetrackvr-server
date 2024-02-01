@@ -1,13 +1,13 @@
 use std::{
     cmp::min,
-    io::{Cursor, Write},
+    io::Cursor,
     sync::Arc,
     time::SystemTime,
 };
 
 use imgui_wgpu::{Texture, TextureConfig};
 use tokio::{io::AsyncReadExt, join, sync::Mutex, task::JoinHandle};
-use tokio_serial::{SerialPort, SerialPortBuilderExt};
+use tokio_serial::SerialPortBuilderExt;
 
 use hex_literal::hex;
 
@@ -47,10 +47,9 @@ impl Camera {
 
     fn start(&mut self, tty_path: String) -> tokio_serial::Result<()> {
         let frame = self.frame.clone();
-        let eye = self.eye;
+        // let eye = self.eye;
 
         let mut port = tokio_serial::new(tty_path, BAUD_RATE).open_native_async()?;
-        port.clear(tokio_serial::ClearBuffer::Input)?;
 
         let future = async move {
             let mut remaining_bytes = Vec::new();
@@ -102,7 +101,7 @@ impl Camera {
 
                 *frame.lock().await = new_frame;
 
-                println!("{:?} frame! {}", eye, port.bytes_to_read().unwrap());
+                // println!("{:?} frame! {}", eye, port.bytes_to_read().unwrap());
             }
         };
 
@@ -180,25 +179,29 @@ mod ui;
 #[tokio::main]
 async fn main() -> tokio_serial::Result<()> {
     let mut l_camera = Camera::new(Eye::L);
-    // let mut r_camera = Camera::new(Eye::R);
+    let mut r_camera = Camera::new(Eye::R);
 
     l_camera.start("COM3".to_string())?;
-    // r_camera.start("COM4".to_string())?;
+    r_camera.start("COM4".to_string())?;
 
     let ui_task = tokio::task::spawn_blocking(|| {
         let mut ui = ui::UI::new();
 
         let l_texture = CameraTexture::new(&mut ui);
+        let r_texture = CameraTexture::new(&mut ui);
 
         ui.run(move |imgui, queue, renderer| {
             l_texture.update_texture(&l_camera.frame.blocking_lock(), queue, renderer);
+            r_texture.update_texture(&r_camera.frame.blocking_lock(), queue, renderer);
 
             imgui.window("Hello!").build(move || {
                 l_texture.build(imgui);
+                imgui.same_line();
+                r_texture.build(imgui);
             });
         });
     });
 
-    // join!(l_camera.task.unwrap(), ui_task);
+    join!(l_camera.task.unwrap(), r_camera.task.unwrap(), ui_task);
     Ok(())
 }
