@@ -1,22 +1,15 @@
 use std::{
     cmp::min,
-    collections::HashMap,
-    env,
-    io::Cursor,
-    str,
-    sync::{Arc, Mutex as StdMutex},
-    time::{Duration, SystemTime},
+    io::{Cursor, Write},
+    sync::Arc,
+    time::SystemTime,
 };
 
-use imgui::TextureId;
 use imgui_wgpu::{Texture, TextureConfig};
 use tokio::{io::AsyncReadExt, join, sync::Mutex, task::JoinHandle};
 use tokio_serial::{SerialPort, SerialPortBuilderExt};
 
 use hex_literal::hex;
-use wgpu::Extent3d;
-
-use image::{codecs::jpeg::JpegDecoder, ImageDecoder};
 
 #[cfg(unix)]
 const DEFAULT_TTY: &str = "/dev/ttyUSB0";
@@ -57,6 +50,7 @@ impl Camera {
         let eye = self.eye;
 
         let mut port = tokio_serial::new(tty_path, BAUD_RATE).open_native_async()?;
+        port.clear(tokio_serial::ClearBuffer::Input)?;
 
         let future = async move {
             let mut remaining_bytes = Vec::new();
@@ -108,13 +102,70 @@ impl Camera {
 
                 *frame.lock().await = new_frame;
 
-                // println!("{:?} frame! {}", eye, port.bytes_to_read().unwrap());
+                println!("{:?} frame! {}", eye, port.bytes_to_read().unwrap());
             }
         };
 
         self.task = Some(tokio::spawn(future));
 
         Ok(())
+    }
+}
+
+#[derive(Clone, Copy)]
+struct CameraTexture {
+    texture_id: imgui::TextureId,
+}
+
+impl CameraTexture {
+    fn new(ui: &mut ui::UI) -> CameraTexture {
+        let texture_config: TextureConfig<'_> = TextureConfig {
+            size: wgpu::Extent3d {
+                width: CAMERA_FRAME_SIZE,
+                height: CAMERA_FRAME_SIZE,
+                ..Default::default()
+            },
+            label: Some("lenna texture"),
+            format: Some(wgpu::TextureFormat::Rgba8UnormSrgb),
+            ..Default::default()
+        };
+
+        let texture = Texture::new(&ui.device, &ui.renderer, texture_config);
+
+        CameraTexture {
+            texture_id: ui.renderer.textures.insert(texture),
+        }
+    }
+
+    fn update_texture(self, frame: &Frame, queue: &wgpu::Queue, renderer: &mut imgui_wgpu::Renderer) {
+        let jpeg_data = frame.data.clone();
+
+        let mut decoder = image::io::Reader::new(Cursor::new(jpeg_data));
+        decoder.set_format(image::ImageFormat::Jpeg);
+        let image = decoder.decode().unwrap().into_rgba8();
+
+        // let expand_range = |v: u8| {
+        //     println!("{}", v);
+        //     (((v - 15) as u32) * 255 / (235 - 15 + 1)) as u8
+        // };
+        // image.pixels_mut().for_each(|p| {
+        //     p.0[0..3].iter_mut().for_each(|p| {*p = expand_range(*p)});
+        // });
+
+        renderer.textures.get(self.texture_id).unwrap().write(
+            &queue,
+            &image,
+            CAMERA_FRAME_SIZE,
+            CAMERA_FRAME_SIZE,
+        );
+    }
+
+    fn build(self, ui: &imgui::Ui) {
+        imgui::Image::new(
+            self.texture_id,
+            [CAMERA_FRAME_SIZE as f32, CAMERA_FRAME_SIZE as f32],
+        )
+        .build(ui);
     }
 }
 
@@ -135,44 +186,19 @@ async fn main() -> tokio_serial::Result<()> {
     // r_camera.start("COM4".to_string())?;
 
     let ui_task = tokio::task::spawn_blocking(|| {
-
         let mut ui = ui::UI::new();
 
-        let texture_config: TextureConfig<'_> = TextureConfig {
-            size: wgpu::Extent3d {
-                width: CAMERA_FRAME_SIZE,
-                height: CAMERA_FRAME_SIZE,
-                ..Default::default()
-            },
-            label: Some("lenna texture"),
-            format: Some(wgpu::TextureFormat::Rgba8Unorm),
-            ..Default::default()
-        };
+        let l_texture = CameraTexture::new(&mut ui);
 
-        let texture = Texture::new(&ui.device, &ui.renderer, texture_config);
-        let l_texture_id = ui.renderer.textures.insert(texture);
+        ui.run(move |imgui, queue, renderer| {
+            l_texture.update_texture(&l_camera.frame.blocking_lock(), queue, renderer);
 
-        ui.run(move |ui, queue, renderer| {
-            let jpeg_data = l_camera.frame.blocking_lock().data.clone();
-
-            let mut decoder = image::io::Reader::new(Cursor::new(jpeg_data));
-            decoder.set_format(image::ImageFormat::Jpeg);
-            let image = decoder.decode().unwrap();
-            // println!("{:?}", decoder.);
-
-            renderer.textures.get(l_texture_id).unwrap().write(
-                &queue,
-                &image.into_rgba8(),
-                CAMERA_FRAME_SIZE,
-                CAMERA_FRAME_SIZE,
-            );
-
-            ui.window("Hello!").build(|| {
-              imgui::Image::new(l_texture_id, [CAMERA_FRAME_SIZE as f32, CAMERA_FRAME_SIZE as f32]).build(ui)
+            imgui.window("Hello!").build(move || {
+                l_texture.build(imgui);
             });
         });
     });
 
-    join!(l_camera.task.unwrap(), ui_task);
+    // join!(l_camera.task.unwrap(), ui_task);
     Ok(())
 }

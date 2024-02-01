@@ -1,11 +1,13 @@
-use image::ImageFormat;
 use imgui::*;
-use imgui_wgpu::{Renderer, RendererConfig, Texture, TextureConfig};
+use imgui_wgpu::{Renderer, RendererConfig};
 use pollster::block_on;
 use std::time::Instant;
-use wgpu::Extent3d;
 use winit::{
-    dpi::LogicalSize, event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent}, event_loop::{ControlFlow, EventLoop, EventLoopBuilder, EventLoopWindowTarget}, platform::windows::EventLoopBuilderExtWindows, window::Window
+    dpi::LogicalSize,
+    event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent},
+    event_loop::{ControlFlow, EventLoopBuilder},
+    platform::windows::EventLoopBuilderExtWindows,
+    window::Window,
 };
 
 pub(crate) struct UI {
@@ -56,7 +58,7 @@ impl UI {
         }))
         .unwrap();
 
-        let (mut device, mut queue) = block_on(adapter.request_device(
+        let (device, queue) = block_on(adapter.request_device(
             &wgpu::DeviceDescriptor {
                 label: None,
                 features: wgpu::Features::empty(),
@@ -109,7 +111,7 @@ impl UI {
             ..Default::default()
         };
 
-        let mut renderer = Renderer::new(&mut imgui, &device, &queue, renderer_config);
+        let renderer = Renderer::new(&mut imgui, &device, &queue, renderer_config);
 
         // Set up Lenna texture
         // let lenna_bytes = include_bytes!("../resources/checker.png");
@@ -149,7 +151,10 @@ impl UI {
         }
     }
 
-    pub fn run<F: Fn(&imgui::Ui, &wgpu::Queue, &mut imgui_wgpu::Renderer) + 'static>(mut self, render: F) {
+    pub fn run<F: Fn(&imgui::Ui, &wgpu::Queue, &mut imgui_wgpu::Renderer) + 'static>(
+        mut self,
+        render: F,
+    ) {
         let clear_color = wgpu::Color {
             r: 0.1,
             g: 0.2,
