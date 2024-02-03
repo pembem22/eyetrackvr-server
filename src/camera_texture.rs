@@ -1,4 +1,4 @@
-use std::io::Cursor;
+use std::{io::Cursor, time::SystemTime};
 
 use imgui_wgpu::{Texture, TextureConfig};
 
@@ -7,6 +7,7 @@ use crate::{ui, Frame, CAMERA_FRAME_SIZE};
 #[derive(Clone, Copy)]
 pub struct CameraTexture {
     texture_id: imgui::TextureId,
+    last_timestamp: SystemTime,
 }
 
 impl CameraTexture {
@@ -26,10 +27,15 @@ impl CameraTexture {
 
         CameraTexture {
             texture_id: ui.renderer.textures.insert(texture),
+            last_timestamp: SystemTime::now(),
         }
     }
 
     pub fn update_texture(self, frame: &Frame, queue: &wgpu::Queue, renderer: &mut imgui_wgpu::Renderer) {
+        if frame.timestamp == self.last_timestamp {
+          return
+        }
+
         let jpeg_data = frame.data.clone();
 
         let mut decoder = image::io::Reader::new(Cursor::new(jpeg_data));
