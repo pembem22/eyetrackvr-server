@@ -1,6 +1,7 @@
-use std::{sync::Arc, time::SystemTime};
+use std::{io::Cursor, sync::Arc, time::SystemTime};
 
 use hex_literal::hex;
+use image::RgbImage;
 use tokio::{io::AsyncReadExt, sync::Mutex, task::JoinHandle};
 use tokio_serial::SerialPortBuilderExt;
 
@@ -17,14 +18,14 @@ pub enum Eye {
 }
 
 pub struct Frame {
-    pub data: Vec<u8>,
+    pub raw_data: Vec<u8>,
+    pub decoded: RgbImage,
     pub timestamp: SystemTime,
 }
 
 pub struct Camera {
     pub eye: Eye,
     pub frame: Arc<Mutex<Frame>>,
-    pub task: Option<JoinHandle<()>>,
 }
 
 impl Camera {
@@ -32,14 +33,14 @@ impl Camera {
         Camera {
             eye,
             frame: Arc::new(Mutex::new(Frame {
-                data: Vec::new(),
+                raw_data: Vec::new(),
+                decoded: RgbImage::new(0, 0),
                 timestamp: SystemTime::now(),
             })),
-            task: None,
         }
     }
 
-    pub fn start(&mut self, tty_path: String) -> tokio_serial::Result<()> {
+    pub fn start(&mut self, tty_path: String) -> tokio_serial::Result<JoinHandle<()>> {
         let frame = self.frame.clone();
         let eye = self.eye;
 
@@ -88,9 +89,14 @@ impl Camera {
                     port.read_exact(&mut buf).await.unwrap();
                 }
 
+                let mut decoder = image::io::Reader::new(Cursor::new(buf.clone()));
+                decoder.set_format(image::ImageFormat::Jpeg);
+                let image = decoder.decode().unwrap().as_rgb8().unwrap().to_owned();
+
                 let new_frame = Frame {
                     timestamp: SystemTime::now(),
-                    data: buf,
+                    raw_data: buf,
+                    decoded: image,
                 };
 
                 *frame.lock().await = new_frame;
@@ -99,8 +105,6 @@ impl Camera {
             }
         };
 
-        self.task = Some(tokio::spawn(future));
-
-        Ok(())
+        Ok(tokio::spawn(future))
     }
 }

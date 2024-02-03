@@ -1,5 +1,6 @@
 use std::{io::Cursor, time::SystemTime};
 
+use image::{DynamicImage, RgbaImage};
 use imgui_wgpu::{Texture, TextureConfig};
 
 use crate::{ui, Frame, CAMERA_FRAME_SIZE};
@@ -36,11 +37,7 @@ impl CameraTexture {
           return
         }
 
-        let jpeg_data = frame.data.clone();
-
-        let mut decoder = image::io::Reader::new(Cursor::new(jpeg_data));
-        decoder.set_format(image::ImageFormat::Jpeg);
-        let image = decoder.decode().unwrap().into_rgba8();
+        let image = DynamicImage::from(frame.decoded.clone()).into_rgba8();
 
         // let expand_range = |v: u8| {
         //     println!("{}", v);
