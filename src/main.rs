@@ -31,8 +31,9 @@ async fn main() -> tokio_serial::Result<()> {
     let (l_camera, r_camera) = app.start_cameras("COM3".to_string(), "COM4".to_string())?;
     let ui = app.start_ui();
     let server = app.start_server();
+    let inference = app.start_inference();
 
-    join!(l_camera, r_camera, ui, server);
-    
+    join!(l_camera, r_camera, ui, server, inference);
+
     Ok(())
 }

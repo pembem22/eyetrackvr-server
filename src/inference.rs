@@ -1,0 +1,148 @@
+use std::net::UdpSocket;
+use std::ops::Sub;
+use std::sync::Arc;
+use std::time::{Duration, SystemTime};
+
+use image::{DynamicImage, GenericImageView};
+use onnxruntime::environment::Environment;
+use onnxruntime::tensor::OrtOwnedTensor;
+use onnxruntime::{ndarray, GraphOptimizationLevel, LoggingLevel, OrtError};
+use tokio::sync::Mutex;
+use tokio::task::JoinHandle;
+
+use rosc::encoder;
+use rosc::{OscMessage, OscPacket, OscType};
+
+use one_euro_rs::OneEuroFilter;
+
+use crate::Frame;
+
+pub fn start_onnx(
+    l_frame_mutex: Arc<Mutex<Frame>>,
+    r_frame_mutex: Arc<Mutex<Frame>>,
+    sock: UdpSocket,
+) -> Result<JoinHandle<()>, OrtError> {
+    Ok(tokio::task::spawn_blocking(move || {
+        let environment = Environment::builder()
+            .with_name("test")
+            .with_log_level(LoggingLevel::Verbose)
+            .build()
+            .unwrap();
+
+        let mut l_session = environment
+            .new_session_builder()
+            .unwrap()
+            .with_optimization_level(GraphOptimizationLevel::All)
+            .unwrap()
+            .with_number_threads(3)
+            .unwrap()
+            .with_model_from_file("model.onnx")
+            .unwrap();
+
+        let mut r_session = environment
+            .new_session_builder()
+            .unwrap()
+            .with_optimization_level(GraphOptimizationLevel::All)
+            .unwrap()
+            .with_number_threads(3)
+            .unwrap()
+            .with_model_from_file("model.onnx")
+            .unwrap();
+
+        let start_timestamp = SystemTime::now().sub(Duration::from_secs(1));
+
+        let mut last_timestamp = SystemTime::now();
+
+        const FREQ: f32 = 70.8;
+        const BETA: f32 = 0.0;
+        const FCMIN: f32 = 1.0;
+        let mut l_p_oe = OneEuroFilter::new(FREQ, FCMIN, FCMIN, BETA);
+        let mut l_y_oe = OneEuroFilter::new(FREQ, FCMIN, FCMIN, BETA);
+        let mut r_p_oe = OneEuroFilter::new(FREQ, FCMIN, FCMIN, BETA);
+        let mut r_y_oe = OneEuroFilter::new(FREQ, FCMIN, FCMIN, BETA);
+
+        loop {
+            let frame = l_frame_mutex.blocking_lock();
+            let l_timestamp = frame.timestamp;
+            if last_timestamp >= frame.timestamp {
+                continue;
+            }
+
+            // println!("{:2.3}", 1000f32 / (frame.timestamp.duration_since(last_timestamp).unwrap().as_millis() as f32));
+
+            last_timestamp = frame.timestamp;
+
+            let array = ndarray::Array::from_iter(frame.decoded.pixels().map(|p| p.0[0] as f32));
+            drop(frame);
+
+            let array = array.into_shape((1, 240, 240, 1)).unwrap();
+
+            let input_tensor = vec![array];
+            let outputs: Vec<OrtOwnedTensor<f32, _>> = l_session.run(input_tensor).unwrap();
+
+            // Collecting with iterator works, using by index throws out of bounds...
+            let l_pitch_yaw = outputs[0].iter().collect::<Vec<_>>();
+
+            let frame = r_frame_mutex.blocking_lock();
+            let r_timestamp = frame.timestamp;
+            if last_timestamp == frame.timestamp {
+                continue;
+            }
+
+            let mirrored_frame = DynamicImage::from(frame.decoded.clone()).fliph();
+            drop(frame);
+
+            let array =
+                ndarray::Array::from_iter(mirrored_frame.pixels().map(|p| p.2 .0[0] as f32));
+
+            let array = array.into_shape((1, 240, 240, 1)).unwrap();
+
+            let input_tensor = vec![array];
+            let outputs: Vec<OrtOwnedTensor<f32, _>> = r_session.run(input_tensor).unwrap();
+
+            // Collecting with iterator works, using by index throws out of bounds...
+            let r_pitch_yaw = outputs[0].iter().collect::<Vec<_>>();
+
+            let l_pitch = l_p_oe.filter_with_timestamp(*l_pitch_yaw[0], l_timestamp.duration_since(start_timestamp).unwrap().as_secs_f32());
+            let l_yaw   = l_y_oe.filter_with_timestamp(*l_pitch_yaw[1], l_timestamp.duration_since(start_timestamp).unwrap().as_secs_f32());
+            let r_pitch = r_p_oe.filter_with_timestamp(*r_pitch_yaw[0], r_timestamp.duration_since(start_timestamp).unwrap().as_secs_f32());
+            let r_yaw   = r_y_oe.filter_with_timestamp(-r_pitch_yaw[1], r_timestamp.duration_since(start_timestamp).unwrap().as_secs_f32());
+
+            let msg_buf = encoder::encode(&OscPacket::Message(OscMessage {
+                addr: "/tracking/eye/LeftRightPitchYaw".to_string(),
+                args: vec![
+                    OscType::Float(l_pitch),
+                    OscType::Float(l_yaw),
+                    OscType::Float(r_pitch),
+                    OscType::Float(r_yaw),
+                ],
+            }))
+            .unwrap();
+
+            // println!("{:3.3} {:3.3} {:3.3} {:3.3}", l_pitch, l_yaw, r_pitch, r_yaw);
+
+            sock.send(&msg_buf).unwrap();
+        }
+    }))
+}
+// struct ONNX<'a> {
+//     environment: Environment,
+//     l_session: Session<'a>,
+// }
+
+// impl<'a> ONNX<'_> {
+//     pub fn new() -> Result<ONNX<'a>, OrtError> {
+// let environment = Environment::builder()
+//     .with_name("test")
+//     .with_log_level(LoggingLevel::Verbose)
+//     .build()?;
+
+// let mut session = environment
+//     .new_session_builder()?
+//     .with_optimization_level(GraphOptimizationLevel::All)?
+//     .with_number_threads(3)?
+//     .with_model_from_file("model.onnx")?;
+
+//         Ok(ONNX { l_session: session })
+//     }
+// }

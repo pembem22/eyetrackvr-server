@@ -1,10 +1,12 @@
+use std::net::UdpSocket;
 use std::time::SystemTime;
 
 use tokio::{fs, io::AsyncWriteExt, net::TcpListener, task::JoinHandle};
 use tokio_stream::StreamExt;
-use tokio_util::codec::{BytesCodec, Decoder};
+use tokio_util::codec::{BytesCodec, Decoder, LinesCodec};
 
 use crate::{camera_texture::CameraTexture, ui, Camera, Eye};
+use crate::inference::start_onnx;
 
 pub(crate) struct App {
     l_camera: Camera,
@@ -62,7 +64,7 @@ impl App {
 
             loop {
                 // Asynchronously wait for an inbound socket.
-                let (socket, _) = listener.accept().await.unwrap();
+                let (mut socket, _) = listener.accept().await.unwrap();
 
                 // And this is where much of the magic of this server happens. We
                 // crucially want all clients to make progress concurrently, rather than
@@ -77,7 +79,7 @@ impl App {
 
                 tokio::spawn(async move {
                     // We're parsing each socket with the `BytesCodec` included in `tokio::codec`.
-                    let mut framed = BytesCodec::new().framed(socket);
+                    let mut framed = LinesCodec::new().framed(socket);
 
                     // We loop while there are messages coming from the Stream `framed`.
                     // The stream will return None once the client disconnects.
@@ -104,7 +106,7 @@ impl App {
                                     .await
                                     .unwrap();
 
-                                file.write_all(&bytes).await.unwrap();
+                                file.write_all(bytes.as_bytes()).await.unwrap();
 
                                 {
                                     let file_path = format!(
@@ -137,6 +139,8 @@ impl App {
 
                                     file.write_all(&r_frame.raw_data).await.unwrap();
                                 }
+
+                                // framed.
                             }
                             Err(err) => println!("Socket closed with error: {:?}", err),
                         }
@@ -145,5 +149,12 @@ impl App {
                 });
             }
         })
+    }
+
+    pub fn start_inference(&mut self) -> JoinHandle<()> {
+        let sock = UdpSocket::bind("127.0.0.1:0").unwrap();
+        sock.connect("127.0.0.1:9000").unwrap();
+
+        start_onnx(self.l_camera.frame.clone(), self.r_camera.frame.clone(), sock).unwrap()
     }
 }
