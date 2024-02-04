@@ -51,11 +51,14 @@ pub fn start_onnx(
 
         let start_timestamp = SystemTime::now().sub(Duration::from_secs(1));
 
-        let mut last_timestamp = SystemTime::now();
+        let mut l_last_timestamp = SystemTime::now();
+        let mut r_last_timestamp = SystemTime::now();
 
         const FREQ: f32 = 70.8;
-        const BETA: f32 = 0.0;
-        const FCMIN: f32 = 1.0;
+        const BETA: f32 = 0.01;
+        const FCMIN: f32 = 2.0;
+        const FOV: f32 = 90.0;
+
         let mut l_p_oe = OneEuroFilter::new(FREQ, FCMIN, FCMIN, BETA);
         let mut l_y_oe = OneEuroFilter::new(FREQ, FCMIN, FCMIN, BETA);
         let mut r_p_oe = OneEuroFilter::new(FREQ, FCMIN, FCMIN, BETA);
@@ -64,13 +67,13 @@ pub fn start_onnx(
         loop {
             let frame = l_frame_mutex.blocking_lock();
             let l_timestamp = frame.timestamp;
-            if last_timestamp >= frame.timestamp {
+            if l_last_timestamp == l_timestamp {
                 continue;
             }
 
-            // println!("{:2.3}", 1000f32 / (frame.timestamp.duration_since(last_timestamp).unwrap().as_millis() as f32));
+            // println!("{:2.3}", 1000f32 / (l_timestamp.duration_since(last_timestamp).unwrap().as_millis() as f32));
 
-            last_timestamp = frame.timestamp;
+            l_last_timestamp = l_timestamp;
 
             let array = ndarray::Array::from_iter(frame.decoded.pixels().map(|p| p.0[0] as f32));
             drop(frame);
@@ -84,13 +87,16 @@ pub fn start_onnx(
             let l_pitch_yaw = outputs[0].iter().collect::<Vec<_>>();
 
             let frame = r_frame_mutex.blocking_lock();
-            let r_timestamp = frame.timestamp;
-            if last_timestamp == frame.timestamp {
-                continue;
-            }
+            let mut r_timestamp = frame.timestamp;
 
             let mirrored_frame = DynamicImage::from(frame.decoded.clone()).fliph();
             drop(frame);
+
+            if r_last_timestamp == r_timestamp {
+              r_timestamp = r_timestamp + Duration::from_millis(1);
+            }
+
+            r_last_timestamp = r_timestamp;
 
             let array =
                 ndarray::Array::from_iter(mirrored_frame.pixels().map(|p| p.2 .0[0] as f32));
@@ -103,10 +109,34 @@ pub fn start_onnx(
             // Collecting with iterator works, using by index throws out of bounds...
             let r_pitch_yaw = outputs[0].iter().collect::<Vec<_>>();
 
-            let l_pitch = l_p_oe.filter_with_timestamp(*l_pitch_yaw[0], l_timestamp.duration_since(start_timestamp).unwrap().as_secs_f32());
-            let l_yaw   = l_y_oe.filter_with_timestamp(*l_pitch_yaw[1], l_timestamp.duration_since(start_timestamp).unwrap().as_secs_f32());
-            let r_pitch = r_p_oe.filter_with_timestamp(*r_pitch_yaw[0], r_timestamp.duration_since(start_timestamp).unwrap().as_secs_f32());
-            let r_yaw   = r_y_oe.filter_with_timestamp(-r_pitch_yaw[1], r_timestamp.duration_since(start_timestamp).unwrap().as_secs_f32());
+            let l_pitch = l_p_oe.filter_with_timestamp(
+                *l_pitch_yaw[0],
+                l_timestamp
+                    .duration_since(start_timestamp)
+                    .unwrap()
+                    .as_secs_f32(),
+            );
+            let l_yaw = l_y_oe.filter_with_timestamp(
+                *l_pitch_yaw[1],
+                l_timestamp
+                    .duration_since(start_timestamp)
+                    .unwrap()
+                    .as_secs_f32(),
+            );
+            let r_pitch = r_p_oe.filter_with_timestamp(
+                *r_pitch_yaw[0],
+                r_timestamp
+                    .duration_since(start_timestamp)
+                    .unwrap()
+                    .as_secs_f32(),
+            );
+            let r_yaw = r_y_oe.filter_with_timestamp(
+                -r_pitch_yaw[1],
+                r_timestamp
+                    .duration_since(start_timestamp)
+                    .unwrap()
+                    .as_secs_f32(),
+            );
 
             let msg_buf = encoder::encode(&OscPacket::Message(OscMessage {
                 addr: "/tracking/eye/LeftRightPitchYaw".to_string(),
@@ -119,7 +149,10 @@ pub fn start_onnx(
             }))
             .unwrap();
 
-            // println!("{:3.3} {:3.3} {:3.3} {:3.3}", l_pitch, l_yaw, r_pitch, r_yaw);
+            // println!(
+            //     "{:3.3} {:3.3} {:3.3} {:3.3}",
+            //     l_pitch, l_pitch_yaw[0], r_pitch, r_pitch_yaw[0]
+            // );
 
             sock.send(&msg_buf).unwrap();
         }
