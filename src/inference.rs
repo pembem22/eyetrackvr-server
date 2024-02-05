@@ -54,22 +54,22 @@ pub fn start_onnx(
         let mut l_last_timestamp = SystemTime::now();
         let mut r_last_timestamp = SystemTime::now();
 
-        const FREQ: f32 = 70.8;
-        const BETA: f32 = 0.3;
-        const FCMIN: f32 = 1.0;
-        const FOV: f32 = 90.0;
-
-        let mut l_p_oe = OneEuroFilter::new(FREQ, FCMIN, FCMIN, BETA);
-        let mut l_y_oe = OneEuroFilter::new(FREQ, FCMIN, FCMIN, BETA);
-        let mut l_e_oe = OneEuroFilter::new(FREQ, FCMIN, FCMIN, BETA);
-        let mut r_p_oe = OneEuroFilter::new(FREQ, FCMIN, FCMIN, BETA);
-        let mut r_y_oe = OneEuroFilter::new(FREQ, FCMIN, FCMIN, BETA);
-        let mut r_e_oe = OneEuroFilter::new(FREQ, FCMIN, FCMIN, BETA);
+        const PY_BETA: f32 = 0.3;
+        const PY_FCMIN: f32 = 1.0;
+        let mut l_p_oe = OneEuroFilter::new(0.0, PY_FCMIN, PY_FCMIN, PY_BETA);
+        let mut l_y_oe = OneEuroFilter::new(0.0, PY_FCMIN, PY_FCMIN, PY_BETA);
+        let mut r_p_oe = OneEuroFilter::new(0.0, PY_FCMIN, PY_FCMIN, PY_BETA);
+        let mut r_y_oe = OneEuroFilter::new(0.0, PY_FCMIN, PY_FCMIN, PY_BETA);
+        
+        const EL_BETA: f32 = 1.0;
+        const EL_FCMIN: f32 = 3.0;
+        let mut l_e_oe = OneEuroFilter::new(0.0, EL_FCMIN, EL_FCMIN, EL_BETA);
+        let mut r_e_oe = OneEuroFilter::new(0.0, EL_FCMIN, EL_FCMIN, EL_BETA);
 
         loop {
             let frame = l_frame_mutex.blocking_lock();
             let l_timestamp = frame.timestamp;
-            if l_last_timestamp == l_timestamp {
+            if l_last_timestamp == l_timestamp || frame.decoded.is_empty() {
                 continue;
             }
 
@@ -90,6 +90,10 @@ pub fn start_onnx(
 
             let frame = r_frame_mutex.blocking_lock();
             let mut r_timestamp = frame.timestamp;
+
+            if frame.decoded.is_empty() {
+                continue;
+            } 
 
             let mirrored_frame = DynamicImage::from(frame.decoded.clone()).fliph();
             drop(frame);
