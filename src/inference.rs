@@ -55,14 +55,16 @@ pub fn start_onnx(
         let mut r_last_timestamp = SystemTime::now();
 
         const FREQ: f32 = 70.8;
-        const BETA: f32 = 0.01;
-        const FCMIN: f32 = 2.0;
+        const BETA: f32 = 0.3;
+        const FCMIN: f32 = 1.0;
         const FOV: f32 = 90.0;
 
         let mut l_p_oe = OneEuroFilter::new(FREQ, FCMIN, FCMIN, BETA);
         let mut l_y_oe = OneEuroFilter::new(FREQ, FCMIN, FCMIN, BETA);
+        let mut l_e_oe = OneEuroFilter::new(FREQ, FCMIN, FCMIN, BETA);
         let mut r_p_oe = OneEuroFilter::new(FREQ, FCMIN, FCMIN, BETA);
         let mut r_y_oe = OneEuroFilter::new(FREQ, FCMIN, FCMIN, BETA);
+        let mut r_e_oe = OneEuroFilter::new(FREQ, FCMIN, FCMIN, BETA);
 
         loop {
             let frame = l_frame_mutex.blocking_lock();
@@ -123,6 +125,13 @@ pub fn start_onnx(
                     .unwrap()
                     .as_secs_f32(),
             );
+            let l_eyelid = l_e_oe.filter_with_timestamp(
+                *l_pitch_yaw[2],
+                l_timestamp
+                    .duration_since(start_timestamp)
+                    .unwrap()
+                    .as_secs_f32(),
+            );
             let r_pitch = r_p_oe.filter_with_timestamp(
                 *r_pitch_yaw[0],
                 r_timestamp
@@ -132,6 +141,13 @@ pub fn start_onnx(
             );
             let r_yaw = r_y_oe.filter_with_timestamp(
                 -r_pitch_yaw[1],
+                r_timestamp
+                    .duration_since(start_timestamp)
+                    .unwrap()
+                    .as_secs_f32(),
+            );
+            let r_eyelid = r_e_oe.filter_with_timestamp(
+                *r_pitch_yaw[2],
                 r_timestamp
                     .duration_since(start_timestamp)
                     .unwrap()
@@ -152,6 +168,21 @@ pub fn start_onnx(
             // println!(
             //     "{:3.3} {:3.3} {:3.3} {:3.3}",
             //     l_pitch, l_pitch_yaw[0], r_pitch, r_pitch_yaw[0]
+            // );
+
+            sock.send(&msg_buf).unwrap();
+
+            let msg_buf = encoder::encode(&OscPacket::Message(OscMessage {
+                addr: "/tracking/eye/EyesClosedAmount".to_string(),
+                args: vec![
+                    OscType::Float(1.0 - (l_eyelid + r_eyelid) / 2.0),
+                ],
+            }))
+            .unwrap();
+
+            // println!(
+            //     "{:3.3} {:3.3} {:3.3} {:3.3}",
+            //     l_yaw, l_pitch_yaw[1], r_yaw, r_pitch_yaw[1]
             // );
 
             sock.send(&msg_buf).unwrap();

@@ -154,6 +154,7 @@ impl App {
     pub fn start_inference(&mut self) -> JoinHandle<()> {
         let sock = UdpSocket::bind("127.0.0.1:0").unwrap();
         sock.connect("127.0.0.1:9000").unwrap();
+        println!("OSC connected");
 
         start_onnx(self.l_camera.frame.clone(), self.r_camera.frame.clone(), sock).unwrap()
     }
