@@ -3,10 +3,10 @@ use std::time::SystemTime;
 
 use tokio::{fs, io::AsyncWriteExt, net::TcpListener, task::JoinHandle};
 use tokio_stream::StreamExt;
-use tokio_util::codec::{BytesCodec, Decoder, LinesCodec};
+use tokio_util::codec::{Decoder, LinesCodec};
 
-use crate::{camera_texture::CameraTexture, ui, Camera, Eye};
 use crate::inference::start_onnx;
+use crate::{camera_texture::CameraTexture, ui, Camera, Eye};
 
 pub(crate) struct App {
     l_camera: Camera,
@@ -64,7 +64,7 @@ impl App {
 
             loop {
                 // Asynchronously wait for an inbound socket.
-                let (mut socket, _) = listener.accept().await.unwrap();
+                let (socket, _) = listener.accept().await.unwrap();
 
                 // And this is where much of the magic of this server happens. We
                 // crucially want all clients to make progress concurrently, rather than
@@ -156,6 +156,11 @@ impl App {
         sock.connect("127.0.0.1:9000").unwrap();
         println!("OSC connected");
 
-        start_onnx(self.l_camera.frame.clone(), self.r_camera.frame.clone(), sock).unwrap()
+        start_onnx(
+            self.l_camera.frame.clone(),
+            self.r_camera.frame.clone(),
+            sock,
+        )
+        .unwrap()
     }
 }

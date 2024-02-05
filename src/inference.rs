@@ -95,7 +95,7 @@ pub fn start_onnx(
             drop(frame);
 
             if r_last_timestamp == r_timestamp {
-              r_timestamp = r_timestamp + Duration::from_millis(1);
+                r_timestamp = r_timestamp + Duration::from_millis(1);
             }
 
             r_last_timestamp = r_timestamp;
@@ -174,9 +174,7 @@ pub fn start_onnx(
 
             let msg_buf = encoder::encode(&OscPacket::Message(OscMessage {
                 addr: "/tracking/eye/EyesClosedAmount".to_string(),
-                args: vec![
-                    OscType::Float(1.0 - (l_eyelid + r_eyelid) / 2.0),
-                ],
+                args: vec![OscType::Float(1.0 - (l_eyelid + r_eyelid) / 2.0)],
             }))
             .unwrap();
 

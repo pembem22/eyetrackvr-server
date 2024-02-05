@@ -1,6 +1,6 @@
-use std::{io::Cursor, time::SystemTime};
+use std::time::SystemTime;
 
-use image::{DynamicImage, RgbaImage};
+use image::DynamicImage;
 use imgui_wgpu::{Texture, TextureConfig};
 
 use crate::{ui, Frame, CAMERA_FRAME_SIZE};
@@ -32,9 +32,14 @@ impl CameraTexture {
         }
     }
 
-    pub fn update_texture(self, frame: &Frame, queue: &wgpu::Queue, renderer: &mut imgui_wgpu::Renderer) {
+    pub fn update_texture(
+        self,
+        frame: &Frame,
+        queue: &wgpu::Queue,
+        renderer: &mut imgui_wgpu::Renderer,
+    ) {
         if frame.timestamp == self.last_timestamp {
-          return
+            return;
         }
 
         let image = DynamicImage::from(frame.decoded.clone()).into_rgba8();
