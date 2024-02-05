@@ -44,62 +44,86 @@ impl Camera {
         let frame = self.frame.clone();
         let eye = self.eye;
 
-        let mut port = tokio_serial::new(tty_path, BAUD_RATE).open_native_async()?;
-
         let future = async move {
-            let mut remaining_bytes = Vec::new();
-            'find_packet: loop {
-                remaining_bytes.resize(remaining_bytes.len() + 2048, 0);
-                let read_position = remaining_bytes.len() - 2048;
-                port.read_exact(&mut remaining_bytes[read_position..])
-                    .await
+            'init: loop {
+                let mut port = tokio_serial::new(tty_path.clone(), BAUD_RATE)
+                    .open_native_async()
                     .unwrap();
+                let mut remaining_bytes = Vec::new();
 
-                for i in 0..remaining_bytes.len() - ETVR_PACKET_HEADER.len() - 2 + 1 {
-                    if remaining_bytes[i..i + ETVR_PACKET_HEADER.len()] == ETVR_PACKET_HEADER {
-                        remaining_bytes.drain(0..i);
-                        break 'find_packet;
+                'find_packet: loop {
+                    remaining_bytes.resize(remaining_bytes.len() + 2048, 0);
+                    let read_position = remaining_bytes.len() - 2048;
+                    match port.read_exact(&mut remaining_bytes[read_position..])
+                        .await {
+                        Ok(..) => (),
+                        Err(error) => {
+                            println!("Serial error: {}", error.kind());
+                            continue 'init;
+                        }
+                    };
+
+                    for i in 0..remaining_bytes.len() - ETVR_PACKET_HEADER.len() - 2 + 1 {
+                        if remaining_bytes[i..i + ETVR_PACKET_HEADER.len()] == ETVR_PACKET_HEADER {
+                            remaining_bytes.drain(0..i);
+                            break 'find_packet;
+                        }
                     }
                 }
-            }
 
-            loop {
-                let mut buf = [0u8; 6];
+                loop {
+                    let mut buf = [0u8; 6];
 
-                if !remaining_bytes.is_empty() {
                     let to_copy = std::cmp::min(remaining_bytes.len(), 6);
                     buf[..to_copy].copy_from_slice(&remaining_bytes[..to_copy]);
                     remaining_bytes.drain(0..to_copy);
-                    port.read_exact(&mut buf[to_copy..]).await.unwrap();
-                } else {
-                    port.read_exact(&mut buf).await.unwrap();
-                }
+                    match port.read_exact(&mut buf[to_copy..]).await {
+                        Ok(..) => (),
+                        Err(error) => {
+                            println!("Serial error: {}", error.kind());
+                            continue 'init;
+                        }
+                    };
 
-                assert_eq!(buf[0..4], ETVR_PACKET_HEADER, "eye {:?}", eye);
-                let packet_len = u16::from_le_bytes([buf[4], buf[5]]) as usize;
+                    if buf[0..4] != ETVR_PACKET_HEADER {
+                        println!("Wrong packet header");
+                        continue 'init;
+                    }
+                    let packet_len = u16::from_le_bytes([buf[4], buf[5]]) as usize;
 
-                let mut buf = vec![0; packet_len];
+                    let mut buf = vec![0; packet_len];
 
-                if !remaining_bytes.is_empty() {
                     let to_copy = std::cmp::min(remaining_bytes.len(), packet_len);
                     buf[..to_copy].copy_from_slice(&remaining_bytes[..to_copy]);
                     remaining_bytes.drain(0..to_copy);
-                    port.read_exact(&mut buf[to_copy..]).await.unwrap();
-                } else {
-                    port.read_exact(&mut buf).await.unwrap();
+                    match port.read_exact(&mut buf[to_copy..]).await {
+                        Ok(..) => (),
+                        Err(error) => {
+                            println!("Serial error: {}", error.kind());
+                            continue 'init;
+                        }
+                    };
+
+                    let mut decoder = image::io::Reader::new(Cursor::new(buf.clone()));
+                    decoder.set_format(image::ImageFormat::Jpeg);
+
+                    let image = decoder.decode();
+
+                    if image.is_err() {
+                        println!("Failed to decode image");
+                        continue 'init;
+                    }
+
+                    let image = image.unwrap().as_rgb8().unwrap().to_owned();
+
+                    let new_frame = Frame {
+                        timestamp: SystemTime::now(),
+                        raw_data: buf,
+                        decoded: image,
+                    };
+
+                    *frame.lock().await = new_frame;
                 }
-
-                let mut decoder = image::io::Reader::new(Cursor::new(buf.clone()));
-                decoder.set_format(image::ImageFormat::Jpeg);
-                let image = decoder.decode().unwrap().as_rgb8().unwrap().to_owned();
-
-                let new_frame = Frame {
-                    timestamp: SystemTime::now(),
-                    raw_data: buf,
-                    decoded: image,
-                };
-
-                *frame.lock().await = new_frame;
 
                 // println!("{:?} frame! {}", eye, port.bytes_to_read().unwrap());
             }
