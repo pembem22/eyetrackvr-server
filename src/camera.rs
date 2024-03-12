@@ -4,6 +4,11 @@ use hex_literal::hex;
 use image::RgbImage;
 use tokio::{io::AsyncReadExt, sync::Mutex, task::JoinHandle};
 use tokio_serial::SerialPortBuilderExt;
+use tokio_stream::StreamExt;
+
+use hyper;
+use hyper::http;
+use mime;
 
 const BAUD_RATE: u32 = 3000000;
 
@@ -41,8 +46,15 @@ impl Camera {
     }
 
     pub fn start(&mut self, tty_path: String) -> tokio_serial::Result<JoinHandle<()>> {
+        if tty_path.starts_with("COM") {
+            self.connect_serial(tty_path)
+        } else {
+            self.connect_http(tty_path)
+        }
+    }
+
+    fn connect_serial(&mut self, tty_path: String) -> tokio_serial::Result<JoinHandle<()>> {
         let frame = self.frame.clone();
-        let eye = self.eye;
 
         let future = async move {
             'init: loop {
@@ -54,8 +66,7 @@ impl Camera {
                 'find_packet: loop {
                     remaining_bytes.resize(remaining_bytes.len() + 2048, 0);
                     let read_position = remaining_bytes.len() - 2048;
-                    match port.read_exact(&mut remaining_bytes[read_position..])
-                        .await {
+                    match port.read_exact(&mut remaining_bytes[read_position..]).await {
                         Ok(..) => (),
                         Err(error) => {
                             println!("Serial error: {}", error.kind());
@@ -126,6 +137,57 @@ impl Camera {
                 }
 
                 // println!("{:?} frame! {}", eye, port.bytes_to_read().unwrap());
+            }
+        };
+
+        Ok(tokio::spawn(future))
+    }
+
+    fn connect_http(&mut self, url: String) -> tokio_serial::Result<JoinHandle<()>> {
+        let frame = self.frame.clone();
+
+        let future = async move {
+            let client = hyper::Client::new();
+            let res = client.get(http::Uri::try_from(url).unwrap()).await.unwrap();
+            if !res.status().is_success() {
+                println!("HTTP request failed with status {}", res.status());
+                return;
+            }
+            let content_type: mime::Mime = res
+                .headers()
+                .get(http::header::CONTENT_TYPE)
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .parse()
+                .unwrap();
+            assert_eq!(content_type.type_(), "multipart");
+            let boundary = content_type.get_param(mime::BOUNDARY).unwrap();
+            let stream = res.into_body();
+            let mut stream = multipart_stream::parse(stream, boundary.as_str());
+            while let Some(p) = stream.next().await {
+                let p = p.unwrap();
+                let buf = p.body;
+                
+                let mut decoder = image::io::Reader::new(Cursor::new(buf.clone()));
+                decoder.set_format(image::ImageFormat::Jpeg);
+
+                let image = decoder.decode();
+
+                if image.is_err() {
+                    println!("Failed to decode image");
+                    continue;
+                }
+
+                let image = image.unwrap().as_rgb8().unwrap().to_owned();
+
+                let new_frame = Frame {
+                    timestamp: SystemTime::now(),
+                    raw_data: buf.to_vec(),
+                    decoded: image,
+                };
+
+                *frame.lock().await = new_frame;
             }
         };
 

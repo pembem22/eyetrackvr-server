@@ -12,7 +12,7 @@ use crate::{app::App, camera::*};
 async fn main() -> tokio_serial::Result<()> {
     let mut app = App::new();
 
-    let (l_camera, r_camera) = app.start_cameras("COM3".to_string(), "COM4".to_string())?;
+    let (l_camera, r_camera) = app.start_cameras("http://192.168.0.227/".to_string(), "http://192.168.0.225/".to_string())?;
     let ui = app.start_ui();
     let server = app.start_server();
     let inference = app.start_inference();
