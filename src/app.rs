@@ -152,7 +152,7 @@ impl App {
     }
 
     pub fn start_inference(&mut self) -> JoinHandle<()> {
-        let sock = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let sock = UdpSocket::bind("0.0.0.0:0").unwrap();
         sock.connect("127.0.0.1:9000").unwrap();
         println!("OSC connected");
 
