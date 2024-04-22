@@ -36,7 +36,7 @@ impl Camera {
             eye,
             frame: Arc::new(Mutex::new(Frame {
                 raw_data: Vec::new(),
-                decoded: RgbImage::new(0, 0),
+                decoded: RgbImage::new(CAMERA_FRAME_SIZE, CAMERA_FRAME_SIZE),
                 timestamp: SystemTime::now(),
             })),
         }
