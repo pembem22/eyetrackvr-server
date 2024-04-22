@@ -1,14 +1,11 @@
 use std::{io::Cursor, sync::Arc, time::SystemTime};
 
 use hex_literal::hex;
+use hyper::http;
 use image::RgbImage;
 use tokio::{io::AsyncReadExt, sync::Mutex, task::JoinHandle};
 use tokio_serial::SerialPortBuilderExt;
 use tokio_stream::StreamExt;
-
-use hyper;
-use hyper::http;
-use mime;
 
 const BAUD_RATE: u32 = 3000000;
 
@@ -168,7 +165,7 @@ impl Camera {
             while let Some(p) = stream.next().await {
                 let p = p.unwrap();
                 let buf = p.body;
-                
+
                 let mut decoder = image::io::Reader::new(Cursor::new(buf.clone()));
                 decoder.set_format(image::ImageFormat::Jpeg);
 

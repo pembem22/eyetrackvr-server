@@ -94,13 +94,13 @@ pub fn start_onnx(
 
             if frame.decoded.is_empty() {
                 continue;
-            } 
+            }
 
             let mirrored_frame = DynamicImage::from(frame.decoded.clone()).fliph();
             drop(frame);
 
             if r_last_timestamp == r_timestamp {
-                r_timestamp = r_timestamp + Duration::from_millis(1);
+                r_timestamp += Duration::from_millis(1);
             }
 
             r_last_timestamp = r_timestamp;

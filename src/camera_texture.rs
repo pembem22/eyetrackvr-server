@@ -53,7 +53,7 @@ impl CameraTexture {
         // });
 
         renderer.textures.get(self.texture_id).unwrap().write(
-            &queue,
+            queue,
             &image,
             CAMERA_FRAME_SIZE,
             CAMERA_FRAME_SIZE,
