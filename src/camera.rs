@@ -1,9 +1,13 @@
-use std::{io::Cursor, sync::Arc, time::SystemTime};
+use std::{
+    io::Cursor,
+    sync::Arc,
+    time::{Duration, SystemTime},
+};
 
 use hex_literal::hex;
 use hyper::http;
 use image::RgbImage;
-use tokio::{io::AsyncReadExt, sync::Mutex, task::JoinHandle};
+use tokio::{io::AsyncReadExt, sync::Mutex, task::JoinHandle, time::sleep};
 use tokio_serial::SerialPortBuilderExt;
 use tokio_stream::StreamExt;
 
@@ -144,47 +148,64 @@ impl Camera {
         let frame = self.frame.clone();
 
         let future = async move {
-            let client = hyper::Client::new();
-            let res = client.get(http::Uri::try_from(url).unwrap()).await.unwrap();
-            if !res.status().is_success() {
-                println!("HTTP request failed with status {}", res.status());
-                return;
-            }
-            let content_type: mime::Mime = res
-                .headers()
-                .get(http::header::CONTENT_TYPE)
-                .unwrap()
-                .to_str()
-                .unwrap()
-                .parse()
-                .unwrap();
-            assert_eq!(content_type.type_(), "multipart");
-            let boundary = content_type.get_param(mime::BOUNDARY).unwrap();
-            let stream = res.into_body();
-            let mut stream = multipart_stream::parse(stream, boundary.as_str());
-            while let Some(p) = stream.next().await {
-                let p = p.unwrap();
-                let buf = p.body;
+            let mut reconnect = false;
 
-                let mut decoder = image::io::Reader::new(Cursor::new(buf.clone()));
-                decoder.set_format(image::ImageFormat::Jpeg);
+            'connect_loop: loop {
+                if reconnect {
+                    println!("Reconnecting in a sec to {}", url);
+                    sleep(Duration::from_secs(1)).await;
+                }
+                reconnect = true;
 
-                let image = decoder.decode();
-
-                if image.is_err() {
-                    println!("Failed to decode image");
-                    continue;
+                let client = hyper::Client::new();
+                let result = client.get(http::Uri::try_from(url.clone()).unwrap()).await;
+                if let Err(err) = result {
+                    println!("{:?}", err);
+                    continue 'connect_loop;
                 }
 
-                let image = image.unwrap().as_rgb8().unwrap().to_owned();
+                let res = result.unwrap();
 
-                let new_frame = Frame {
-                    timestamp: SystemTime::now(),
-                    raw_data: buf.to_vec(),
-                    decoded: image,
-                };
+                if !res.status().is_success() {
+                    println!("HTTP request failed with status {}", res.status());
+                    return;
+                }
+                let content_type: mime::Mime = res
+                    .headers()
+                    .get(http::header::CONTENT_TYPE)
+                    .unwrap()
+                    .to_str()
+                    .unwrap()
+                    .parse()
+                    .unwrap();
+                assert_eq!(content_type.type_(), "multipart");
+                let boundary = content_type.get_param(mime::BOUNDARY).unwrap();
+                let stream = res.into_body();
+                let mut stream = multipart_stream::parse(stream, boundary.as_str());
+                while let Some(p) = stream.next().await {
+                    let p = p.unwrap();
+                    let buf = p.body;
 
-                *frame.lock().await = new_frame;
+                    let mut decoder = image::io::Reader::new(Cursor::new(buf.clone()));
+                    decoder.set_format(image::ImageFormat::Jpeg);
+
+                    let image = decoder.decode();
+
+                    if image.is_err() {
+                        println!("Failed to decode image");
+                        continue;
+                    }
+
+                    let image = image.unwrap().as_rgb8().unwrap().to_owned();
+
+                    let new_frame = Frame {
+                        timestamp: SystemTime::now(),
+                        raw_data: buf.to_vec(),
+                        decoded: image,
+                    };
+
+                    *frame.lock().await = new_frame;
+                }
             }
         };
 
