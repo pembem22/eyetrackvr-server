@@ -21,6 +21,7 @@ pub fn start_onnx(
     l_frame_mutex: Arc<Mutex<Frame>>,
     r_frame_mutex: Arc<Mutex<Frame>>,
     sock: UdpSocket,
+    model_path: String,
 ) -> Result<JoinHandle<()>, OrtError> {
     Ok(tokio::task::spawn_blocking(move || {
         let environment = Environment::builder()
@@ -36,7 +37,7 @@ pub fn start_onnx(
             .unwrap()
             .with_number_threads(3)
             .unwrap()
-            .with_model_from_file("model.onnx")
+            .with_model_from_file(model_path.as_str())
             .unwrap();
 
         let mut r_session = environment
@@ -46,7 +47,7 @@ pub fn start_onnx(
             .unwrap()
             .with_number_threads(3)
             .unwrap()
-            .with_model_from_file("model.onnx")
+            .with_model_from_file(model_path.as_str())
             .unwrap();
 
         let start_timestamp = SystemTime::now().sub(Duration::from_secs(1));

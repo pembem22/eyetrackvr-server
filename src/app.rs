@@ -151,7 +151,11 @@ impl App {
         })
     }
 
-    pub fn start_inference(&mut self, osc_out_address: String) -> JoinHandle<()> {
+    pub fn start_inference(
+        &mut self,
+        osc_out_address: String,
+        model_path: String,
+    ) -> JoinHandle<()> {
         let sock = UdpSocket::bind("0.0.0.0:0").unwrap();
         sock.connect(osc_out_address).unwrap();
         println!("OSC connected");
@@ -160,6 +164,7 @@ impl App {
             self.l_camera.frame.clone(),
             self.r_camera.frame.clone(),
             sock,
+            model_path,
         )
         .unwrap()
     }

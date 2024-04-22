@@ -27,6 +27,10 @@ struct Args {
     /// OSC output address
     #[arg(short = 'o')]
     osc_out_address: String,
+
+    /// Path to the ONNX model
+    #[arg(short = 'm', default_value = "./model.onnx")]
+    model_path: String,
 }
 
 #[tokio::main]
@@ -47,7 +51,7 @@ async fn main() -> tokio_serial::Result<()> {
     tasks.push(server);
 
     if args.inference {
-        let inference = app.start_inference(args.osc_out_address);
+        let inference = app.start_inference(args.osc_out_address, args.model_path);
         tasks.push(inference);
     }
 
