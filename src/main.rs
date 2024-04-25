@@ -1,4 +1,5 @@
 use clap::Parser;
+use postage::broadcast;
 use tokio::join;
 
 mod app;
@@ -37,9 +38,13 @@ struct Args {
 async fn main() -> tokio_serial::Result<()> {
     let args = Args::parse();
 
-    let mut app = App::new();
+    let (l_cam_tx, l_cam_rx) = broadcast::channel::<Frame>(8);
+    let (r_cam_tx, r_cam_rx) = broadcast::channel::<Frame>(8);
+    
+    let mut app = App::new(l_cam_tx, r_cam_tx);
 
     let mut tasks = Vec::new();
+
 
     let (l_camera, r_camera) = app.start_cameras(args.l_camera_url, args.r_camera_url)?;
     let ui = app.start_ui();
@@ -51,7 +56,7 @@ async fn main() -> tokio_serial::Result<()> {
     tasks.push(server);
 
     if args.inference {
-        let inference = app.start_inference(args.osc_out_address, args.model_path);
+        let inference = app.start_inference(args.osc_out_address, args.model_path, l_cam_rx, r_cam_rx);
         tasks.push(inference);
     }
 

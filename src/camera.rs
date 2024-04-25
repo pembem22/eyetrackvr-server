@@ -7,6 +7,7 @@ use std::{
 use hex_literal::hex;
 use hyper::http;
 use image::RgbImage;
+use postage::{broadcast::Sender, sink::Sink};
 use tokio::{io::AsyncReadExt, sync::Mutex, task::JoinHandle, time::sleep};
 use tokio_serial::SerialPortBuilderExt;
 use tokio_stream::StreamExt;
@@ -23,6 +24,7 @@ pub enum Eye {
     R,
 }
 
+#[derive(Clone)]
 pub struct Frame {
     pub raw_data: Vec<u8>,
     pub decoded: RgbImage,
@@ -32,12 +34,14 @@ pub struct Frame {
 pub struct Camera {
     pub eye: Eye,
     pub frame: Arc<Mutex<Frame>>,
+    sender: Sender<Frame>,
 }
 
 impl Camera {
-    pub fn new(eye: Eye) -> Camera {
+    pub fn new(eye: Eye, sender: Sender<Frame>) -> Camera {
         Camera {
             eye,
+            sender,
             frame: Arc::new(Mutex::new(Frame {
                 raw_data: Vec::new(),
                 decoded: RgbImage::new(CAMERA_FRAME_SIZE, CAMERA_FRAME_SIZE),
@@ -46,16 +50,16 @@ impl Camera {
         }
     }
 
-    pub fn start(&mut self, tty_path: String) -> tokio_serial::Result<JoinHandle<()>> {
-        if tty_path.starts_with("COM") {
-            self.connect_serial(tty_path)
+    pub fn start(&mut self, path: String) -> tokio_serial::Result<JoinHandle<()>> {
+        if path.starts_with("COM") {
+            self.connect_serial(path)
         } else {
-            self.connect_http(tty_path)
+            self.connect_http(path)
         }
     }
 
     fn connect_serial(&mut self, tty_path: String) -> tokio_serial::Result<JoinHandle<()>> {
-        let frame = self.frame.clone();
+        let mut sender = self.sender.clone();
 
         let future = async move {
             'init: loop {
@@ -134,7 +138,7 @@ impl Camera {
                         decoded: image,
                     };
 
-                    *frame.lock().await = new_frame;
+                    let _ = sender.send(new_frame).await;
                 }
 
                 // println!("{:?} frame! {}", eye, port.bytes_to_read().unwrap());
@@ -145,7 +149,7 @@ impl Camera {
     }
 
     fn connect_http(&mut self, url: String) -> tokio_serial::Result<JoinHandle<()>> {
-        let frame = self.frame.clone();
+        let mut sender = self.sender.clone();
 
         let future = async move {
             let mut reconnect = false;
@@ -204,7 +208,7 @@ impl Camera {
                         decoded: image,
                     };
 
-                    *frame.lock().await = new_frame;
+                   let _ = sender.send(new_frame).await;
                 }
             }
         };

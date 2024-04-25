@@ -1,13 +1,13 @@
 use std::net::UdpSocket;
 use std::ops::Sub;
-use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use image::{DynamicImage, GenericImageView};
 use onnxruntime::environment::Environment;
 use onnxruntime::tensor::OrtOwnedTensor;
 use onnxruntime::{ndarray, GraphOptimizationLevel, LoggingLevel, OrtError};
-use tokio::sync::Mutex;
+use postage::broadcast::{self, Receiver, Sender};
+use postage::sink::Sink;
+use postage::stream::Stream;
 use tokio::task::JoinHandle;
 
 use rosc::encoder;
@@ -15,201 +15,213 @@ use rosc::{OscMessage, OscPacket, OscType};
 
 use one_euro_rs::OneEuroFilter;
 
-use crate::Frame;
+use crate::{Eye, Frame};
+
+#[derive(Clone, Debug, Default)]
+pub struct EyeState {
+    pitch: f32,
+    yaw: f32,
+    openness: f32,
+}
 
 pub fn start_onnx(
-    l_frame_mutex: Arc<Mutex<Frame>>,
-    r_frame_mutex: Arc<Mutex<Frame>>,
+    l_rx: Receiver<Frame>,
+    r_rx: Receiver<Frame>,
     sock: UdpSocket,
     model_path: String,
 ) -> Result<JoinHandle<()>, OrtError> {
-    Ok(tokio::task::spawn_blocking(move || {
+    let (l_eye_tx, l_eye_rx) = broadcast::channel::<EyeState>(2);
+    let (r_eye_tx, r_eye_rx) = broadcast::channel::<EyeState>(2);
+
+    inference_task(l_rx, &model_path, l_eye_tx);
+    inference_task(r_rx, &model_path, r_eye_tx);
+
+    let l_eye_rx = l_eye_rx.map(|es| (Eye::L, es));
+    let r_eye_rx = r_eye_rx.map(|es| (Eye::R, es));
+
+    let mut eyes_rx = l_eye_rx.merge(r_eye_rx);
+
+    Ok(tokio::spawn(async move {
+        let mut l_eye_state: EyeState = Default::default();
+        let mut r_eye_state: EyeState = Default::default();
+
+        while let Some((eye, state)) = eyes_rx.recv().await {
+            println!("{:?} {:?}", eye, state);
+
+            match eye {
+                Eye::L => l_eye_state = state,
+                Eye::R => r_eye_state = state,
+            };
+
+            let l = &l_eye_state;
+            let r = &r_eye_state;
+
+            const VRCHAT_NATIVE: bool = true;
+            const VRCFT_V2: bool = false;
+
+            if VRCHAT_NATIVE {
+                let msg_buf = encoder::encode(&OscPacket::Message(OscMessage {
+                    addr: "/tracking/eye/LeftRightPitchYaw".to_string(),
+                    args: vec![
+                        OscType::Float(l.pitch),
+                        OscType::Float(l.yaw),
+                        OscType::Float(r.pitch),
+                        OscType::Float(r.yaw),
+                    ],
+                }))
+                .unwrap();
+                sock.send(&msg_buf).unwrap();
+
+                let msg_buf = encoder::encode(&OscPacket::Message(OscMessage {
+                    addr: "/tracking/eye/EyesClosedAmount".to_string(),
+                    args: vec![OscType::Float(1.0 - (l.openness + r.openness) / 2.0)],
+                }))
+                .unwrap();
+                sock.send(&msg_buf).unwrap();
+            }
+
+            if VRCFT_V2 {
+                sock.send(
+                    &encoder::encode(&OscPacket::Message(OscMessage {
+                        addr: "/avatar/parameters/v2/EyeLeftX".to_string(),
+                        args: vec![OscType::Float(l.yaw / 90.0)],
+                    }))
+                    .unwrap(),
+                )
+                .unwrap();
+                sock.send(
+                    &encoder::encode(&OscPacket::Message(OscMessage {
+                        addr: "/avatar/parameters/v2/EyeLeftY".to_string(),
+                        args: vec![OscType::Float(-l.pitch / 90.0)],
+                    }))
+                    .unwrap(),
+                )
+                .unwrap();
+                sock.send(
+                    &encoder::encode(&OscPacket::Message(OscMessage {
+                        addr: "/avatar/parameters/v2/EyeLidLeft".to_string(),
+                        args: vec![OscType::Float(l.openness * 0.75)],
+                    }))
+                    .unwrap(),
+                )
+                .unwrap();
+
+                sock.send(
+                    &encoder::encode(&OscPacket::Message(OscMessage {
+                        addr: "/avatar/parameters/v2/EyeRightX".to_string(),
+                        args: vec![OscType::Float(r.yaw / 90.0)],
+                    }))
+                    .unwrap(),
+                )
+                .unwrap();
+                sock.send(
+                    &encoder::encode(&OscPacket::Message(OscMessage {
+                        addr: "/avatar/parameters/v2/EyeRightY".to_string(),
+                        args: vec![OscType::Float(-r.pitch / 90.0)],
+                    }))
+                    .unwrap(),
+                )
+                .unwrap();
+                sock.send(
+                    &encoder::encode(&OscPacket::Message(OscMessage {
+                        addr: "/avatar/parameters/v2/EyeLidRight".to_string(),
+                        args: vec![OscType::Float(r.openness * 0.75)],
+                    }))
+                    .unwrap(),
+                )
+                .unwrap();
+            }
+        }
+    }))
+}
+
+pub fn inference_task(
+    mut rx: Receiver<Frame>,
+    model_path: &str,
+    mut tx: Sender<EyeState>,
+) -> JoinHandle<()> {
+    const PY_BETA: f32 = 0.3;
+    const PY_FCMIN: f32 = 0.5;
+    let mut filter_pitch = OneEuroFilter::new(0.0, PY_FCMIN, PY_FCMIN, PY_BETA);
+    let mut filter_yaw = OneEuroFilter::new(0.0, PY_FCMIN, PY_FCMIN, PY_BETA);
+
+    const EL_BETA: f32 = 1.0;
+    const EL_FCMIN: f32 = 3.0;
+    let mut filter_openness = OneEuroFilter::new(0.0, EL_FCMIN, EL_FCMIN, EL_BETA);
+
+    let start_timestamp = SystemTime::now().sub(Duration::from_secs(1));
+
+    let model_path = model_path.to_owned();
+
+    tokio::task::spawn_blocking(move || {
+        // Cannot share the environment between threads.
         let environment = Environment::builder()
             .with_name("test")
             .with_log_level(LoggingLevel::Verbose)
             .build()
             .unwrap();
 
-        let mut l_session = environment
+        let mut session = environment
             .new_session_builder()
             .unwrap()
             .with_optimization_level(GraphOptimizationLevel::All)
             .unwrap()
             .with_number_threads(3)
             .unwrap()
-            .with_model_from_file(model_path.as_str())
+            .with_model_from_file(model_path)
             .unwrap();
-
-        let mut r_session = environment
-            .new_session_builder()
-            .unwrap()
-            .with_optimization_level(GraphOptimizationLevel::All)
-            .unwrap()
-            .with_number_threads(3)
-            .unwrap()
-            .with_model_from_file(model_path.as_str())
-            .unwrap();
-
-        let start_timestamp = SystemTime::now().sub(Duration::from_secs(1));
-
-        let mut l_last_timestamp = SystemTime::now();
-        let mut r_last_timestamp = SystemTime::now();
-
-        const PY_BETA: f32 = 0.3;
-        const PY_FCMIN: f32 = 1.0;
-        let mut l_p_oe = OneEuroFilter::new(0.0, PY_FCMIN, PY_FCMIN, PY_BETA);
-        let mut l_y_oe = OneEuroFilter::new(0.0, PY_FCMIN, PY_FCMIN, PY_BETA);
-        let mut r_p_oe = OneEuroFilter::new(0.0, PY_FCMIN, PY_FCMIN, PY_BETA);
-        let mut r_y_oe = OneEuroFilter::new(0.0, PY_FCMIN, PY_FCMIN, PY_BETA);
-        
-        const EL_BETA: f32 = 1.0;
-        const EL_FCMIN: f32 = 3.0;
-        let mut l_e_oe = OneEuroFilter::new(0.0, EL_FCMIN, EL_FCMIN, EL_BETA);
-        let mut r_e_oe = OneEuroFilter::new(0.0, EL_FCMIN, EL_FCMIN, EL_BETA);
 
         loop {
-            let frame = l_frame_mutex.blocking_lock();
-            let l_timestamp = frame.timestamp;
-            if l_last_timestamp == l_timestamp || frame.decoded.is_empty() {
-                continue;
-            }
+            let frame = match rx.try_recv() {
+                Ok(mut frame) => {
+                    let mut frames_skipped = 0;
+                    while let Ok(new_frame) = rx.try_recv() {
+                        frame = new_frame;
+                        frames_skipped += 1;
+                    }
 
-            // println!("{:2.3}", 1000f32 / (l_timestamp.duration_since(last_timestamp).unwrap().as_millis() as f32));
+                    if frames_skipped > 0 {
+                        println!("Skipped {frames_skipped} frame(s)");
+                    }
+                    Some(frame)
+                }
+                Err(_) => rx.blocking_recv(),
+            };
 
-            l_last_timestamp = l_timestamp;
+            let frame = match frame {
+                Some(frame) => frame,
+                None => {
+                    println!("Got an empty frame");
+                    continue;
+                }
+            };
 
             let array = ndarray::Array::from_iter(frame.decoded.pixels().map(|p| p.0[0] as f32));
-            drop(frame);
 
             let array = array.into_shape((1, 240, 240, 1)).unwrap();
 
             let input_tensor = vec![array];
-            let outputs: Vec<OrtOwnedTensor<f32, _>> = l_session.run(input_tensor).unwrap();
+            let output: Vec<OrtOwnedTensor<f32, _>> = session.run(input_tensor).unwrap();
 
             // Collecting with iterator works, using by index throws out of bounds...
-            let l_pitch_yaw = outputs[0].iter().collect::<Vec<_>>();
+            let output = output[0].iter().collect::<Vec<_>>();
 
-            let frame = r_frame_mutex.blocking_lock();
-            let mut r_timestamp = frame.timestamp;
+            let filter_secs = frame
+                .timestamp
+                .duration_since(start_timestamp)
+                .unwrap()
+                .as_secs_f32();
 
-            if frame.decoded.is_empty() {
-                continue;
-            }
+            let pitch = filter_pitch.filter_with_timestamp(*output[0], filter_secs);
+            let yaw = filter_yaw.filter_with_timestamp(*output[1], filter_secs);
+            let openness = filter_openness.filter_with_timestamp(*output[2], filter_secs);
 
-            let mirrored_frame = DynamicImage::from(frame.decoded.clone()).fliph();
-            drop(frame);
-
-            if r_last_timestamp == r_timestamp {
-                r_timestamp += Duration::from_millis(1);
-            }
-
-            r_last_timestamp = r_timestamp;
-
-            let array =
-                ndarray::Array::from_iter(mirrored_frame.pixels().map(|p| p.2 .0[0] as f32));
-
-            let array = array.into_shape((1, 240, 240, 1)).unwrap();
-
-            let input_tensor = vec![array];
-            let outputs: Vec<OrtOwnedTensor<f32, _>> = r_session.run(input_tensor).unwrap();
-
-            // Collecting with iterator works, using by index throws out of bounds...
-            let r_pitch_yaw = outputs[0].iter().collect::<Vec<_>>();
-
-            let l_pitch = l_p_oe.filter_with_timestamp(
-                *l_pitch_yaw[0],
-                l_timestamp
-                    .duration_since(start_timestamp)
-                    .unwrap()
-                    .as_secs_f32(),
-            );
-            let l_yaw = l_y_oe.filter_with_timestamp(
-                *l_pitch_yaw[1],
-                l_timestamp
-                    .duration_since(start_timestamp)
-                    .unwrap()
-                    .as_secs_f32(),
-            );
-            let l_eyelid = l_e_oe.filter_with_timestamp(
-                *l_pitch_yaw[2],
-                l_timestamp
-                    .duration_since(start_timestamp)
-                    .unwrap()
-                    .as_secs_f32(),
-            );
-            let r_pitch = r_p_oe.filter_with_timestamp(
-                *r_pitch_yaw[0],
-                r_timestamp
-                    .duration_since(start_timestamp)
-                    .unwrap()
-                    .as_secs_f32(),
-            );
-            let r_yaw = r_y_oe.filter_with_timestamp(
-                -r_pitch_yaw[1],
-                r_timestamp
-                    .duration_since(start_timestamp)
-                    .unwrap()
-                    .as_secs_f32(),
-            );
-            let r_eyelid = r_e_oe.filter_with_timestamp(
-                *r_pitch_yaw[2],
-                r_timestamp
-                    .duration_since(start_timestamp)
-                    .unwrap()
-                    .as_secs_f32(),
-            );
-
-            let msg_buf = encoder::encode(&OscPacket::Message(OscMessage {
-                addr: "/tracking/eye/LeftRightPitchYaw".to_string(),
-                args: vec![
-                    OscType::Float(l_pitch),
-                    OscType::Float(l_yaw),
-                    OscType::Float(r_pitch),
-                    OscType::Float(r_yaw),
-                ],
-            }))
+            tx.blocking_send(EyeState {
+                pitch,
+                yaw,
+                openness,
+            })
             .unwrap();
-
-            // println!(
-            //     "{:3.3} {:3.3} {:3.3} {:3.3}",
-            //     l_pitch, l_pitch_yaw[0], r_pitch, r_pitch_yaw[0]
-            // );
-
-            sock.send(&msg_buf).unwrap();
-
-            let msg_buf = encoder::encode(&OscPacket::Message(OscMessage {
-                addr: "/tracking/eye/EyesClosedAmount".to_string(),
-                args: vec![OscType::Float(1.0 - (l_eyelid + r_eyelid) / 2.0)],
-            }))
-            .unwrap();
-
-            // println!(
-            //     "{:3.3} {:3.3} {:3.3} {:3.3}",
-            //     l_yaw, l_pitch_yaw[1], r_yaw, r_pitch_yaw[1]
-            // );
-
-            sock.send(&msg_buf).unwrap();
         }
-    }))
+    })
 }
-// struct ONNX<'a> {
-//     environment: Environment,
-//     l_session: Session<'a>,
-// }
-
-// impl<'a> ONNX<'_> {
-//     pub fn new() -> Result<ONNX<'a>, OrtError> {
-// let environment = Environment::builder()
-//     .with_name("test")
-//     .with_log_level(LoggingLevel::Verbose)
-//     .build()?;
-
-// let mut session = environment
-//     .new_session_builder()?
-//     .with_optimization_level(GraphOptimizationLevel::All)?
-//     .with_number_threads(3)?
-//     .with_model_from_file("model.onnx")?;
-
-//         Ok(ONNX { l_session: session })
-//     }
-// }

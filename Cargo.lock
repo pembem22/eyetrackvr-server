@@ -135,6 +135,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "atomic"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c59bdb34bc650a32731b31bd8f0829cc15d24a708ee31559e0bb34f2bc320cba"
+
+[[package]]
 name = "autocfg"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -508,6 +514,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "crossbeam-queue"
+version = "0.3.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "df0346b5d5e76ac2fe4e327c5fd1118d6be7c51dfb18f9b7922923f287471e35"
+dependencies = [
+ "crossbeam-utils",
+]
+
+[[package]]
 name = "crossbeam-utils"
 version = "0.8.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -717,7 +732,8 @@ dependencies = [
  "multipart-stream",
  "one-euro-rs",
  "onnxruntime",
- "pollster",
+ "pollster 0.3.0",
+ "postage",
  "rosc",
  "tokio",
  "tokio-serial",
@@ -1897,9 +1913,31 @@ dependencies = [
 
 [[package]]
 name = "pollster"
+version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5da3b0203fd7ee5720aa0b5e790b591aa5d3f41c3ed2c34a3a393382198af2f7"
+
+[[package]]
+name = "pollster"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "22686f4785f02a4fcc856d3b3bb19bf6c8160d103f7a99cc258bddd0251dc7f2"
+
+[[package]]
+name = "postage"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "af3fb618632874fb76937c2361a7f22afd393c982a2165595407edc75b06d3c1"
+dependencies = [
+ "atomic",
+ "crossbeam-queue",
+ "log",
+ "parking_lot",
+ "pin-project",
+ "pollster 0.2.5",
+ "static_assertions",
+ "thiserror",
+]
 
 [[package]]
 name = "proc-macro-crate"

@@ -1,11 +1,13 @@
 use std::net::UdpSocket;
 use std::time::SystemTime;
 
+use postage::broadcast::{Receiver, Sender};
 use tokio::{fs, io::AsyncWriteExt, net::TcpListener, task::JoinHandle};
 use tokio_stream::StreamExt;
 use tokio_util::codec::{Decoder, LinesCodec};
 
 use crate::inference::start_onnx;
+use crate::Frame;
 use crate::{camera_texture::CameraTexture, ui, Camera, Eye};
 
 pub(crate) struct App {
@@ -14,9 +16,9 @@ pub(crate) struct App {
 }
 
 impl App {
-    pub fn new() -> App {
-        let l_camera = Camera::new(Eye::L);
-        let r_camera = Camera::new(Eye::R);
+    pub fn new(l_sender: Sender<Frame>, r_sender: Sender<Frame>) -> App {
+        let l_camera = Camera::new(Eye::L, l_sender);
+        let r_camera = Camera::new(Eye::R, r_sender);
 
         App { l_camera, r_camera }
     }
@@ -155,17 +157,13 @@ impl App {
         &mut self,
         osc_out_address: String,
         model_path: String,
+        l_rx: Receiver<Frame>,
+        r_rx: Receiver<Frame>,
     ) -> JoinHandle<()> {
         let sock = UdpSocket::bind("0.0.0.0:0").unwrap();
         sock.connect(osc_out_address).unwrap();
         println!("OSC connected");
 
-        start_onnx(
-            self.l_camera.frame.clone(),
-            self.r_camera.frame.clone(),
-            sock,
-            model_path,
-        )
-        .unwrap()
+        start_onnx(l_rx, r_rx, sock, model_path).unwrap()
     }
 }

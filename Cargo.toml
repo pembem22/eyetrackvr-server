@@ -20,6 +20,7 @@ multipart-stream = "0.1.2"
 one-euro-rs = "0.2.0"
 onnxruntime = "0.0.14"
 pollster = "0.3.0"
+postage = "0.5.0"
 rosc = "0.10.1"
 tokio = { version = "1.35.1", features = ["full"] }
 tokio-serial = "5.4.4"
