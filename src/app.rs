@@ -1,4 +1,5 @@
 use std::net::UdpSocket;
+use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
 use postage::broadcast::{Receiver, Sender};
@@ -34,19 +35,22 @@ impl App {
         ))
     }
 
-    pub fn start_ui(&mut self) -> JoinHandle<()> {
-        let ui_l_frame = self.l_camera.frame.clone();
-        let ui_r_frame = self.r_camera.frame.clone();
-
+    pub fn start_ui(&mut self, l_rx: Receiver<Frame>, r_rx: Receiver<Frame>) -> JoinHandle<()> {
         tokio::task::spawn_blocking(|| {
             let mut ui = ui::UI::new();
 
             let l_texture = CameraTexture::new(&mut ui);
             let r_texture = CameraTexture::new(&mut ui);
 
+            let l_rx = Arc::new(Mutex::new(l_rx));
+            let r_rx = Arc::new(Mutex::new(r_rx));
+
             ui.run(move |imgui, queue, renderer| {
-                l_texture.update_texture(&ui_l_frame.blocking_lock(), queue, renderer);
-                r_texture.update_texture(&ui_r_frame.blocking_lock(), queue, renderer);
+                let mut l_rx = l_rx.lock().unwrap();
+                let mut r_rx = r_rx.lock().unwrap();
+
+                l_texture.update_texture(&mut l_rx, queue, renderer);
+                r_texture.update_texture(&mut r_rx, queue, renderer);
 
                 imgui.window("Hello!").build(move || {
                     l_texture.build(imgui);
@@ -157,6 +161,7 @@ impl App {
         &mut self,
         osc_out_address: String,
         model_path: String,
+        threads_per_eye: usize,
         l_rx: Receiver<Frame>,
         r_rx: Receiver<Frame>,
     ) -> JoinHandle<()> {
@@ -164,6 +169,6 @@ impl App {
         sock.connect(osc_out_address).unwrap();
         println!("OSC connected");
 
-        start_onnx(l_rx, r_rx, sock, model_path).unwrap()
+        start_onnx(l_rx, r_rx, sock, model_path, threads_per_eye).unwrap()
     }
 }

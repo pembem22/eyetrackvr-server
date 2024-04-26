@@ -29,12 +29,13 @@ pub fn start_onnx(
     r_rx: Receiver<Frame>,
     sock: UdpSocket,
     model_path: String,
+    threads_per_eye: usize,
 ) -> Result<JoinHandle<()>, OrtError> {
     let (l_eye_tx, l_eye_rx) = broadcast::channel::<EyeState>(2);
     let (r_eye_tx, r_eye_rx) = broadcast::channel::<EyeState>(2);
 
-    inference_task(l_rx, &model_path, l_eye_tx);
-    inference_task(r_rx, &model_path, r_eye_tx);
+    inference_task(l_rx, &model_path, threads_per_eye, l_eye_tx);
+    inference_task(r_rx, &model_path, threads_per_eye, r_eye_tx);
 
     let l_eye_rx = l_eye_rx.map(|es| (Eye::L, es));
     let r_eye_rx = r_eye_rx.map(|es| (Eye::R, es));
@@ -138,6 +139,7 @@ pub fn start_onnx(
 pub fn inference_task(
     mut rx: Receiver<Frame>,
     model_path: &str,
+    threads: usize,
     mut tx: Sender<EyeState>,
 ) -> JoinHandle<()> {
     const PY_BETA: f32 = 0.3;
@@ -166,7 +168,7 @@ pub fn inference_task(
             .unwrap()
             .with_optimization_level(GraphOptimizationLevel::All)
             .unwrap()
-            .with_number_threads(3)
+            .with_number_threads(threads.try_into().unwrap())
             .unwrap()
             .with_model_from_file(model_path)
             .unwrap();

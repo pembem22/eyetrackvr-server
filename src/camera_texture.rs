@@ -1,14 +1,12 @@
-use std::time::SystemTime;
-
 use image::DynamicImage;
 use imgui_wgpu::{Texture, TextureConfig};
+use postage::{broadcast::Receiver, stream::Stream};
 
 use crate::{ui, Frame, CAMERA_FRAME_SIZE};
 
 #[derive(Clone, Copy)]
 pub struct CameraTexture {
     texture_id: imgui::TextureId,
-    last_timestamp: SystemTime,
 }
 
 impl CameraTexture {
@@ -28,19 +26,19 @@ impl CameraTexture {
 
         CameraTexture {
             texture_id: ui.renderer.textures.insert(texture),
-            last_timestamp: SystemTime::now(),
         }
     }
 
     pub fn update_texture(
         self,
-        frame: &Frame,
+        rx: &mut Receiver<Frame>,
         queue: &wgpu::Queue,
         renderer: &mut imgui_wgpu::Renderer,
     ) {
-        if frame.timestamp == self.last_timestamp {
-            return;
-        }
+        let frame = match rx.try_recv() {
+            Ok(frame) => frame,
+            Err(_) => return,
+        };
 
         let image = DynamicImage::from(frame.decoded.clone()).into_rgba8();
 
