@@ -4,10 +4,10 @@ use std::{
     time::{Duration, SystemTime},
 };
 
+use async_broadcast::Sender;
 use hex_literal::hex;
 use hyper::http;
 use image::RgbImage;
-use postage::{broadcast::Sender, sink::Sink};
 use tokio::{io::AsyncReadExt, sync::Mutex, task::JoinHandle, time::sleep};
 use tokio_serial::SerialPortBuilderExt;
 use tokio_stream::StreamExt;
@@ -59,7 +59,7 @@ impl Camera {
     }
 
     fn connect_serial(&mut self, tty_path: String) -> tokio_serial::Result<JoinHandle<()>> {
-        let mut sender = self.sender.clone();
+        let sender = self.sender.clone();
 
         let future = async move {
             'init: loop {
@@ -138,7 +138,7 @@ impl Camera {
                         decoded: image,
                     };
 
-                    let _ = sender.send(new_frame).await;
+                    let _ = sender.broadcast_direct(new_frame).await;
                 }
 
                 // println!("{:?} frame! {}", eye, port.bytes_to_read().unwrap());
@@ -149,7 +149,7 @@ impl Camera {
     }
 
     fn connect_http(&mut self, url: String) -> tokio_serial::Result<JoinHandle<()>> {
-        let mut sender = self.sender.clone();
+        let sender = self.sender.clone();
 
         let future = async move {
             let mut reconnect = false;
@@ -208,7 +208,7 @@ impl Camera {
                         decoded: image,
                     };
 
-                   let _ = sender.send(new_frame).await;
+                    let _ = sender.broadcast_direct(new_frame).await;
                 }
             }
         };

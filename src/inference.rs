@@ -2,18 +2,18 @@ use std::net::UdpSocket;
 use std::ops::Sub;
 use std::time::{Duration, SystemTime};
 
+use async_broadcast::{broadcast, Receiver, RecvError, Sender};
 use onnxruntime::environment::Environment;
 use onnxruntime::tensor::OrtOwnedTensor;
 use onnxruntime::{ndarray, GraphOptimizationLevel, LoggingLevel, OrtError};
-use postage::broadcast::{self, Receiver, Sender};
-use postage::sink::Sink;
-use postage::stream::Stream;
+use tokio::runtime::Handle;
 use tokio::task::JoinHandle;
 
 use rosc::encoder;
 use rosc::{OscMessage, OscPacket, OscType};
 
 use one_euro_rs::OneEuroFilter;
+use tokio_stream::StreamExt;
 
 use crate::{Eye, Frame};
 
@@ -31,8 +31,8 @@ pub fn start_onnx(
     model_path: String,
     threads_per_eye: usize,
 ) -> Result<JoinHandle<()>, OrtError> {
-    let (l_eye_tx, l_eye_rx) = broadcast::channel::<EyeState>(2);
-    let (r_eye_tx, r_eye_rx) = broadcast::channel::<EyeState>(2);
+    let (l_eye_tx, l_eye_rx) = broadcast::<EyeState>(1);
+    let (r_eye_tx, r_eye_rx) = broadcast::<EyeState>(1);
 
     inference_task(l_rx, &model_path, threads_per_eye, l_eye_tx);
     inference_task(r_rx, &model_path, threads_per_eye, r_eye_tx);
@@ -46,7 +46,7 @@ pub fn start_onnx(
         let mut l_eye_state: EyeState = Default::default();
         let mut r_eye_state: EyeState = Default::default();
 
-        while let Some((eye, state)) = eyes_rx.recv().await {
+        while let Some((eye, state)) = eyes_rx.next().await {
             println!("{:?} {:?}", eye, state);
 
             match eye {
@@ -140,7 +140,7 @@ pub fn inference_task(
     mut rx: Receiver<Frame>,
     model_path: &str,
     threads: usize,
-    mut tx: Sender<EyeState>,
+    tx: Sender<EyeState>,
 ) -> JoinHandle<()> {
     const PY_BETA: f32 = 0.3;
     const PY_FCMIN: f32 = 0.5;
@@ -173,29 +173,25 @@ pub fn inference_task(
             .with_model_from_file(model_path)
             .unwrap();
 
-        loop {
-            let frame = match rx.try_recv() {
-                Ok(mut frame) => {
-                    let mut frames_skipped = 0;
-                    while let Ok(new_frame) = rx.try_recv() {
-                        frame = new_frame;
-                        frames_skipped += 1;
-                    }
+        let handle = Handle::current();
 
-                    if frames_skipped > 0 {
-                        println!("Skipped {frames_skipped} frame(s)");
+        loop {
+            let frame = handle.block_on(async {
+                match rx.recv_direct().await {
+                    Ok(frame) => Some(frame),
+                    Err(e) => {
+                        match e {
+                            RecvError::Overflowed(skipped) => println!("Skipped {skipped} frames"),
+                            RecvError::Closed => println!("Channel closed"),
+                        };
+                        None
                     }
-                    Some(frame)
                 }
-                Err(_) => rx.blocking_recv(),
-            };
+            });
 
             let frame = match frame {
                 Some(frame) => frame,
-                None => {
-                    println!("Got an empty frame");
-                    continue;
-                }
+                None => continue,
             };
 
             let array = ndarray::Array::from_iter(frame.decoded.pixels().map(|p| p.0[0] as f32));
@@ -218,12 +214,14 @@ pub fn inference_task(
             let yaw = filter_yaw.filter_with_timestamp(*output[1], filter_secs);
             let openness = filter_openness.filter_with_timestamp(*output[2], filter_secs);
 
-            tx.blocking_send(EyeState {
-                pitch,
-                yaw,
-                openness,
-            })
-            .unwrap();
+            let _ = handle.block_on(async {
+                tx.broadcast_direct(EyeState {
+                    pitch,
+                    yaw,
+                    openness,
+                })
+                .await
+            });
         }
     })
 }

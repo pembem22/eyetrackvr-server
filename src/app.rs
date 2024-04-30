@@ -2,7 +2,7 @@ use std::net::UdpSocket;
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
-use postage::broadcast::{Receiver, Sender};
+use async_broadcast::{Receiver, Sender};
 use tokio::{fs, io::AsyncWriteExt, net::TcpListener, task::JoinHandle};
 use tokio_stream::StreamExt;
 use tokio_util::codec::{Decoder, LinesCodec};

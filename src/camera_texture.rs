@@ -1,6 +1,6 @@
+use async_broadcast::Receiver;
 use image::DynamicImage;
 use imgui_wgpu::{Texture, TextureConfig};
-use postage::{broadcast::Receiver, stream::Stream};
 
 use crate::{ui, Frame, CAMERA_FRAME_SIZE};
 

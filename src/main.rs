@@ -1,5 +1,5 @@
+use async_broadcast::broadcast;
 use clap::Parser;
-use postage::broadcast;
 use tokio::join;
 
 mod app;
@@ -42,8 +42,11 @@ struct Args {
 async fn main() -> tokio_serial::Result<()> {
     let args = Args::parse();
 
-    let (l_cam_tx, l_cam_rx) = broadcast::channel::<Frame>(8);
-    let (r_cam_tx, r_cam_rx) = broadcast::channel::<Frame>(8);
+    let (l_cam_tx, mut l_cam_rx) = broadcast::<Frame>(1);
+    let (r_cam_tx, mut r_cam_rx) = broadcast::<Frame>(1);
+
+    l_cam_rx.set_overflow(true);
+    r_cam_rx.set_overflow(true);
 
     let mut app = App::new(l_cam_tx, r_cam_tx);
 
