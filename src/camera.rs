@@ -1,6 +1,5 @@
 use std::{
     io::Cursor,
-    sync::Arc,
     time::{Duration, SystemTime},
 };
 
@@ -8,7 +7,7 @@ use async_broadcast::Sender;
 use hex_literal::hex;
 use hyper::http;
 use image::RgbImage;
-use tokio::{io::AsyncReadExt, sync::Mutex, task::JoinHandle, time::sleep};
+use tokio::{io::AsyncReadExt, task::JoinHandle, time::sleep};
 use tokio_serial::SerialPortBuilderExt;
 use tokio_stream::StreamExt;
 
@@ -33,21 +32,12 @@ pub struct Frame {
 
 pub struct Camera {
     pub eye: Eye,
-    pub frame: Arc<Mutex<Frame>>,
     sender: Sender<Frame>,
 }
 
 impl Camera {
     pub fn new(eye: Eye, sender: Sender<Frame>) -> Camera {
-        Camera {
-            eye,
-            sender,
-            frame: Arc::new(Mutex::new(Frame {
-                raw_data: Vec::new(),
-                decoded: RgbImage::new(CAMERA_FRAME_SIZE, CAMERA_FRAME_SIZE),
-                timestamp: SystemTime::now(),
-            })),
-        }
+        Camera { eye, sender }
     }
 
     pub fn start(&mut self, path: String) -> tokio_serial::Result<JoinHandle<()>> {

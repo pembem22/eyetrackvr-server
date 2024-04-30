@@ -3,6 +3,7 @@ use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
 use async_broadcast::{Receiver, Sender};
+use tokio::join;
 use tokio::{fs, io::AsyncWriteExt, net::TcpListener, task::JoinHandle};
 use tokio_stream::StreamExt;
 use tokio_util::codec::{Decoder, LinesCodec};
@@ -61,10 +62,7 @@ impl App {
         })
     }
 
-    pub fn start_server(&mut self) -> JoinHandle<()> {
-        let l_frame = self.l_camera.frame.clone();
-        let r_frame = self.r_camera.frame.clone();
-
+    pub fn start_server(&mut self, l_rx: Receiver<Frame>, r_rx: Receiver<Frame>) -> JoinHandle<()> {
         tokio::spawn(async move {
             let listener = TcpListener::bind("0.0.0.0:7070").await.unwrap();
 
@@ -80,8 +78,8 @@ impl App {
                 // Essentially here we're executing a new task to run concurrently,
                 // which will allow all of our clients to be processed concurrently.
 
-                let l_frame = l_frame.clone();
-                let r_frame = r_frame.clone();
+                let l_rx = l_rx.clone().deactivate();
+                let r_rx = r_rx.clone().deactivate();
 
                 tokio::spawn(async move {
                     // We're parsing each socket with the `BytesCodec` included in `tokio::codec`.
@@ -94,8 +92,27 @@ impl App {
                             Ok(bytes) => {
                                 println!("bytes: {:?}", bytes);
 
-                                let l_frame = l_frame.lock().await;
-                                let r_frame = r_frame.lock().await;
+                                let mut l_rx = l_rx.activate_cloned();
+                                let mut r_rx = r_rx.activate_cloned();
+
+                                // Await for a frame from for each eye.
+                                let (mut l_frame, mut r_frame) = join!(l_rx.recv(), r_rx.recv());
+
+                                // Grab new frames if we got some new ones while awaiting above or skip overflow error.
+                                if let Ok(frame) = l_rx.try_recv() {
+                                    l_frame = Ok(frame)
+                                }
+                                if let Ok(frame) = r_rx.try_recv() {
+                                    r_frame = Ok(frame)
+                                }
+
+                                let (l_frame, r_frame) = match (l_frame, r_frame) {
+                                    (Ok(l_frame), Ok(r_frame)) => (l_frame, r_frame),
+                                    (_, _) => {
+                                        println!("Failed to get frames for a save");
+                                        continue;
+                                    }
+                                };
 
                                 let timestamp: chrono::DateTime<chrono::Local> =
                                     SystemTime::now().into();
@@ -145,8 +162,6 @@ impl App {
 
                                     file.write_all(&r_frame.raw_data).await.unwrap();
                                 }
-
-                                // framed.
                             }
                             Err(err) => println!("Socket closed with error: {:?}", err),
                         }

@@ -54,7 +54,7 @@ async fn main() -> tokio_serial::Result<()> {
 
     let (l_camera, r_camera) = app.start_cameras(args.l_camera_url, args.r_camera_url)?;
     let ui = app.start_ui(l_cam_rx.clone(), r_cam_rx.clone());
-    let server = app.start_server();
+    let server = app.start_server(l_cam_rx.clone(), r_cam_rx.clone());
 
     tasks.push(l_camera);
     tasks.push(r_camera);
