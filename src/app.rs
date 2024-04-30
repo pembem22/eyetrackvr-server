@@ -123,7 +123,7 @@ impl App {
                                 );
 
                                 let mut file = fs::OpenOptions::new()
-                                    .create(true)
+                                    .create_new(true)
                                     .write(true)
                                     .open(file_path.clone())
                                     .await
@@ -138,7 +138,7 @@ impl App {
                                     );
 
                                     let mut file = fs::OpenOptions::new()
-                                        .create(true)
+                                        .create_new(true)
                                         .write(true)
                                         .open(file_path.clone())
                                         .await
@@ -154,7 +154,7 @@ impl App {
                                     );
 
                                     let mut file = fs::OpenOptions::new()
-                                        .create(true)
+                                        .create_new(true)
                                         .write(true)
                                         .open(file_path.clone())
                                         .await
