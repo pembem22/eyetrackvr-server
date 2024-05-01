@@ -3,7 +3,8 @@ use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
 use async_broadcast::{Receiver, Sender};
-use tokio::join;
+use futures::future::join_all;
+use serde_json::Value;
 use tokio::{fs, io::AsyncWriteExt, net::TcpListener, task::JoinHandle};
 use tokio_stream::StreamExt;
 use tokio_util::codec::{Decoder, LinesCodec};
@@ -92,27 +93,45 @@ impl App {
                             Ok(bytes) => {
                                 println!("bytes: {:?}", bytes);
 
-                                let mut l_rx = l_rx.activate_cloned();
-                                let mut r_rx = r_rx.activate_cloned();
-
-                                // Await for a frame from for each eye.
-                                let (mut l_frame, mut r_frame) = join!(l_rx.recv(), r_rx.recv());
-
-                                // Grab new frames if we got some new ones while awaiting above or skip overflow error.
-                                if let Ok(frame) = l_rx.try_recv() {
-                                    l_frame = Ok(frame)
-                                }
-                                if let Ok(frame) = r_rx.try_recv() {
-                                    r_frame = Ok(frame)
-                                }
-
-                                let (l_frame, r_frame) = match (l_frame, r_frame) {
-                                    (Ok(l_frame), Ok(r_frame)) => (l_frame, r_frame),
-                                    (_, _) => {
-                                        println!("Failed to get frames for a save");
+                                let json: Value = match serde_json::from_str(&bytes) {
+                                    Ok(parsed) => parsed,
+                                    Err(e) => {
+                                        println!("Failed to parse JSON: {e:?}");
                                         continue;
                                     }
                                 };
+
+                                let mut cameras: Vec<Receiver<Frame>> = Vec::new();
+                                let mut letters = Vec::new();
+                                if json.get("l").is_some() {
+                                    cameras.push(l_rx.activate_cloned());
+                                    letters.push('L');
+                                }
+                                if json.get("r").is_some() {
+                                    cameras.push(r_rx.activate_cloned());
+                                    letters.push('R');
+                                }
+
+                                // Await for a frame from for each eye.
+                                let mut frames =
+                                    join_all(cameras.iter_mut().map(|c| c.recv())).await;
+
+                                // Grab new frames if we got some new ones while awaiting above or skip overflow error.
+                                for (i, camera) in cameras.iter_mut().enumerate() {
+                                    if let Ok(frame) = camera.try_recv() {
+                                        frames[i] = Ok(frame)
+                                    }
+                                }
+
+                                if frames.iter().any(|frame| frame.is_err()) {
+                                    println!("Failed to get frames for a save");
+                                    continue;
+                                }
+
+                                let frames: Vec<_> = frames
+                                    .iter_mut()
+                                    .map(|frame| frame.as_mut().unwrap())
+                                    .collect();
 
                                 let timestamp: chrono::DateTime<chrono::Local> =
                                     SystemTime::now().into();
@@ -125,42 +144,27 @@ impl App {
                                 let mut file = fs::OpenOptions::new()
                                     .create_new(true)
                                     .write(true)
-                                    .open(file_path.clone())
+                                    .open(file_path)
                                     .await
                                     .unwrap();
 
                                 file.write_all(bytes.as_bytes()).await.unwrap();
 
-                                {
+                                for (i, frame) in frames.iter().enumerate() {
                                     let file_path = format!(
-                                        "./images/{}_L.jpg",
-                                        timestamp.format("%Y-%m-%d_%H-%M-%S%.3f")
+                                        "./images/{}_{}.jpg",
+                                        timestamp.format("%Y-%m-%d_%H-%M-%S%.3f"),
+                                        letters[i]
                                     );
 
                                     let mut file = fs::OpenOptions::new()
                                         .create_new(true)
                                         .write(true)
-                                        .open(file_path.clone())
+                                        .open(file_path)
                                         .await
                                         .unwrap();
 
-                                    file.write_all(&l_frame.raw_data).await.unwrap();
-                                }
-
-                                {
-                                    let file_path = format!(
-                                        "./images/{}_R.jpg",
-                                        timestamp.format("%Y-%m-%d_%H-%M-%S%.3f")
-                                    );
-
-                                    let mut file = fs::OpenOptions::new()
-                                        .create_new(true)
-                                        .write(true)
-                                        .open(file_path.clone())
-                                        .await
-                                        .unwrap();
-
-                                    file.write_all(&r_frame.raw_data).await.unwrap();
+                                    file.write_all(&frame.raw_data).await.unwrap();
                                 }
                             }
                             Err(err) => println!("Socket closed with error: {:?}", err),
