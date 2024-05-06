@@ -63,6 +63,8 @@ impl CameraTexture {
             self.texture_id,
             [CAMERA_FRAME_SIZE as f32, CAMERA_FRAME_SIZE as f32],
         )
+        .uv0([1.0, 0.0])
+        .uv1([0.0, 1.0])
         .build(ui);
     }
 }
