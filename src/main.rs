@@ -16,11 +16,11 @@ use crate::{app::App, camera::*};
 #[command(version, about, long_about = None)]
 struct Args {
     /// Left camera URL
-    #[arg(short = 'l')]
+    #[arg(short = 'l', default_value = "http://openiristracker_l.local/")]
     l_camera_url: String,
 
     /// Right camera URL
-    #[arg(short = 'r')]
+    #[arg(short = 'r', default_value = "http://openiristracker_r.local/")]
     r_camera_url: String,
 
     /// Enable inference
@@ -28,7 +28,7 @@ struct Args {
     inference: bool,
 
     /// OSC output address
-    #[arg(short = 'o')]
+    #[arg(short = 'o', default_value = "localhost:9000")]
     osc_out_address: String,
 
     /// Path to the ONNX model
