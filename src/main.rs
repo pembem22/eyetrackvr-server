@@ -1,10 +1,12 @@
 use async_broadcast::broadcast;
 use clap::Parser;
+use frame_server::start_frame_server;
 use tokio::join;
 
 mod app;
 mod camera;
 mod camera_texture;
+mod frame_server;
 mod inference;
 mod ui;
 
@@ -54,7 +56,7 @@ async fn main() -> tokio_serial::Result<()> {
 
     let (l_camera, r_camera) = app.start_cameras(args.l_camera_url, args.r_camera_url)?;
     let ui = app.start_ui(l_cam_rx.clone(), r_cam_rx.clone());
-    let server = app.start_server(l_cam_rx.clone(), r_cam_rx.clone());
+    let server = start_frame_server(l_cam_rx.clone(), r_cam_rx.clone());
 
     tasks.push(l_camera);
     tasks.push(r_camera);
