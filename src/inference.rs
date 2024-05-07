@@ -1,4 +1,3 @@
-use std::net::UdpSocket;
 use std::ops::Sub;
 use std::time::{Duration, SystemTime};
 
@@ -9,28 +8,25 @@ use onnxruntime::{ndarray, GraphOptimizationLevel, LoggingLevel, OrtError};
 use tokio::runtime::Handle;
 use tokio::task::JoinHandle;
 
-use rosc::encoder;
-use rosc::{OscMessage, OscPacket, OscType};
-
 use one_euro_rs::OneEuroFilter;
 use tokio_stream::StreamExt;
 
 use crate::{Eye, Frame};
 
-#[derive(Clone, Debug, Default)]
+#[derive(Copy, Clone, Debug, Default)]
 pub struct EyeState {
-    pitch: f32,
-    yaw: f32,
-    openness: f32,
+    pub pitch: f32,
+    pub yaw: f32,
+    pub openness: f32,
 }
 
-pub fn start_onnx(
+pub fn start_inference(
     l_rx: Receiver<Frame>,
     r_rx: Receiver<Frame>,
-    sock: UdpSocket,
+    out_tx: Sender<(EyeState, EyeState)>,
     model_path: String,
     threads_per_eye: usize,
-) -> Result<JoinHandle<()>, OrtError> {
+) -> JoinHandle<()> {
     let (l_eye_tx, l_eye_rx) = broadcast::<EyeState>(1);
     let (r_eye_tx, r_eye_rx) = broadcast::<EyeState>(1);
 
@@ -42,7 +38,7 @@ pub fn start_onnx(
 
     let mut eyes_rx = l_eye_rx.merge(r_eye_rx);
 
-    Ok(tokio::spawn(async move {
+    tokio::spawn(async move {
         let mut l_eye_state: EyeState = Default::default();
         let mut r_eye_state: EyeState = Default::default();
 
@@ -54,86 +50,12 @@ pub fn start_onnx(
                 Eye::R => r_eye_state = state,
             };
 
-            let l = &l_eye_state;
-            let r = &r_eye_state;
-
-            const VRCHAT_NATIVE: bool = true;
-            const VRCFT_V2: bool = false;
-
-            if VRCHAT_NATIVE {
-                let msg_buf = encoder::encode(&OscPacket::Message(OscMessage {
-                    addr: "/tracking/eye/LeftRightPitchYaw".to_string(),
-                    args: vec![
-                        OscType::Float(l.pitch),
-                        OscType::Float(l.yaw),
-                        OscType::Float(r.pitch),
-                        OscType::Float(r.yaw),
-                    ],
-                }))
+            out_tx
+                .broadcast_direct((l_eye_state, r_eye_state))
+                .await
                 .unwrap();
-                sock.send(&msg_buf).unwrap();
-
-                let msg_buf = encoder::encode(&OscPacket::Message(OscMessage {
-                    addr: "/tracking/eye/EyesClosedAmount".to_string(),
-                    args: vec![OscType::Float(1.0 - (l.openness + r.openness) / 2.0)],
-                }))
-                .unwrap();
-                sock.send(&msg_buf).unwrap();
-            }
-
-            if VRCFT_V2 {
-                sock.send(
-                    &encoder::encode(&OscPacket::Message(OscMessage {
-                        addr: "/avatar/parameters/v2/EyeLeftX".to_string(),
-                        args: vec![OscType::Float(l.yaw / 90.0)],
-                    }))
-                    .unwrap(),
-                )
-                .unwrap();
-                sock.send(
-                    &encoder::encode(&OscPacket::Message(OscMessage {
-                        addr: "/avatar/parameters/v2/EyeLeftY".to_string(),
-                        args: vec![OscType::Float(-l.pitch / 90.0)],
-                    }))
-                    .unwrap(),
-                )
-                .unwrap();
-                sock.send(
-                    &encoder::encode(&OscPacket::Message(OscMessage {
-                        addr: "/avatar/parameters/v2/EyeLidLeft".to_string(),
-                        args: vec![OscType::Float(l.openness * 0.75)],
-                    }))
-                    .unwrap(),
-                )
-                .unwrap();
-
-                sock.send(
-                    &encoder::encode(&OscPacket::Message(OscMessage {
-                        addr: "/avatar/parameters/v2/EyeRightX".to_string(),
-                        args: vec![OscType::Float(r.yaw / 90.0)],
-                    }))
-                    .unwrap(),
-                )
-                .unwrap();
-                sock.send(
-                    &encoder::encode(&OscPacket::Message(OscMessage {
-                        addr: "/avatar/parameters/v2/EyeRightY".to_string(),
-                        args: vec![OscType::Float(-r.pitch / 90.0)],
-                    }))
-                    .unwrap(),
-                )
-                .unwrap();
-                sock.send(
-                    &encoder::encode(&OscPacket::Message(OscMessage {
-                        addr: "/avatar/parameters/v2/EyeLidRight".to_string(),
-                        args: vec![OscType::Float(r.openness * 0.75)],
-                    }))
-                    .unwrap(),
-                )
-                .unwrap();
-            }
         }
-    }))
+    })
 }
 
 pub fn inference_task(

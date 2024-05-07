@@ -1,13 +1,16 @@
 use async_broadcast::broadcast;
 use clap::Parser;
 use frame_server::start_frame_server;
-use tokio::join;
+use futures::future::try_join_all;
+use inference::{start_inference, EyeState};
+use osc_sender::start_osc_sender;
 
 mod app;
 mod camera;
 mod camera_texture;
 mod frame_server;
 mod inference;
+mod osc_sender;
 mod ui;
 
 use crate::{app::App, camera::*};
@@ -36,7 +39,7 @@ struct Args {
     model_path: String,
 
     /// Number of threads to use for inference per eye
-    #[arg(short = 't', default_value_t = 3)]
+    #[arg(short = 't', default_value_t = 1)]
     threads_per_eye: usize,
 }
 
@@ -49,6 +52,8 @@ async fn main() -> tokio_serial::Result<()> {
 
     l_cam_rx.set_overflow(true);
     r_cam_rx.set_overflow(true);
+
+    let (raw_eyes_tx, raw_eyes_rx) = broadcast::<(EyeState, EyeState)>(1);
 
     let mut app = App::new(l_cam_tx, r_cam_tx);
 
@@ -64,23 +69,24 @@ async fn main() -> tokio_serial::Result<()> {
     tasks.push(server);
 
     if args.inference {
-        let inference = app.start_inference(
-            args.osc_out_address,
-            args.model_path,
-            args.threads_per_eye,
+        let inference = start_inference(
             l_cam_rx.clone(),
             r_cam_rx.clone(),
+            raw_eyes_tx.clone(),
+            args.model_path,
+            args.threads_per_eye,
         );
         tasks.push(inference);
     }
 
+    let osc_sender = start_osc_sender(raw_eyes_rx.clone(), args.osc_out_address);
+    tasks.push(osc_sender);
+
     drop(l_cam_rx);
     drop(r_cam_rx);
+    drop(raw_eyes_rx);
 
-    // TODO: this can be done better
-    for task in tasks {
-        join!(task).0.unwrap();
-    }
+    let _ = try_join_all(tasks).await.unwrap();
 
     Ok(())
 }

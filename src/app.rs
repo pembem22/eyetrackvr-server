@@ -1,10 +1,8 @@
-use std::net::UdpSocket;
 use std::sync::{Arc, Mutex};
 
 use async_broadcast::{Receiver, Sender};
 use tokio::task::JoinHandle;
 
-use crate::inference::start_onnx;
 use crate::Frame;
 use crate::{camera_texture::CameraTexture, ui, Camera, Eye};
 
@@ -56,20 +54,5 @@ impl App {
                 });
             });
         })
-    }
-
-    pub fn start_inference(
-        &mut self,
-        osc_out_address: String,
-        model_path: String,
-        threads_per_eye: usize,
-        l_rx: Receiver<Frame>,
-        r_rx: Receiver<Frame>,
-    ) -> JoinHandle<()> {
-        let sock = UdpSocket::bind("0.0.0.0:0").unwrap();
-        sock.connect(osc_out_address).unwrap();
-        println!("OSC connected");
-
-        start_onnx(l_rx, r_rx, sock, model_path, threads_per_eye).unwrap()
     }
 }
