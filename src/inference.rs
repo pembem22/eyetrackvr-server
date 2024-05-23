@@ -4,7 +4,7 @@ use std::time::{Duration, SystemTime};
 use async_broadcast::{broadcast, Receiver, RecvError, Sender};
 use onnxruntime::environment::Environment;
 use onnxruntime::tensor::OrtOwnedTensor;
-use onnxruntime::{ndarray, GraphOptimizationLevel, LoggingLevel, OrtError};
+use onnxruntime::{ndarray, GraphOptimizationLevel, LoggingLevel};
 use tokio::runtime::Handle;
 use tokio::task::JoinHandle;
 
