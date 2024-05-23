@@ -1,7 +1,7 @@
 use std::time::SystemTime;
 
 use async_broadcast::Receiver;
-use futures::future::join_all;
+use futures::{future::join_all, SinkExt};
 use serde_json::Value;
 use tokio::{fs, io::AsyncWriteExt, net::TcpListener, task::JoinHandle};
 use tokio_stream::StreamExt;
@@ -58,48 +58,34 @@ pub fn start_frame_server(l_rx: Receiver<Frame>, r_rx: Receiver<Frame>) -> JoinH
                                 letters.push('R');
                             }
 
-                            // Await for a frame from for each eye.
-                            let mut frames = join_all(cameras.iter_mut().map(|c| c.recv())).await;
+                            for _ in 0..5 {
+                                // Await for a frame from for each eye.
+                                let mut frames =
+                                    join_all(cameras.iter_mut().map(|c| c.recv())).await;
 
-                            // Grab new frames if we got some new ones while awaiting above or skip overflow error.
-                            for (i, camera) in cameras.iter_mut().enumerate() {
-                                if let Ok(frame) = camera.try_recv() {
-                                    frames[i] = Ok(frame)
+                                // Grab new frames if we got some new ones while awaiting above or skip overflow error.
+                                for (i, camera) in cameras.iter_mut().enumerate() {
+                                    if let Ok(frame) = camera.try_recv() {
+                                        frames[i] = Ok(frame)
+                                    }
                                 }
-                            }
 
-                            if frames.iter().any(|frame| frame.is_err()) {
-                                println!("Failed to get frames for a save");
-                                continue;
-                            }
+                                if frames.iter().any(|frame| frame.is_err()) {
+                                    println!("Failed to get frames for a save");
+                                    continue;
+                                }
 
-                            let frames: Vec<_> = frames
-                                .iter_mut()
-                                .map(|frame| frame.as_mut().unwrap())
-                                .collect();
+                                let frames: Vec<_> = frames
+                                    .iter_mut()
+                                    .map(|frame| frame.as_mut().unwrap())
+                                    .collect();
 
-                            let timestamp: chrono::DateTime<chrono::Local> =
-                                SystemTime::now().into();
+                                let timestamp: chrono::DateTime<chrono::Local> =
+                                    SystemTime::now().into();
 
-                            let file_path = format!(
-                                "./images/{}.json",
-                                timestamp.format("%Y-%m-%d_%H-%M-%S%.3f")
-                            );
-
-                            let mut file = fs::OpenOptions::new()
-                                .create_new(true)
-                                .write(true)
-                                .open(file_path)
-                                .await
-                                .unwrap();
-
-                            file.write_all(bytes.as_bytes()).await.unwrap();
-
-                            for (i, frame) in frames.iter().enumerate() {
                                 let file_path = format!(
-                                    "./images/{}_{}.jpg",
-                                    timestamp.format("%Y-%m-%d_%H-%M-%S%.3f"),
-                                    letters[i]
+                                    "./images/{}.json",
+                                    timestamp.format("%Y-%m-%d_%H-%M-%S%.3f")
                                 );
 
                                 let mut file = fs::OpenOptions::new()
@@ -109,8 +95,27 @@ pub fn start_frame_server(l_rx: Receiver<Frame>, r_rx: Receiver<Frame>) -> JoinH
                                     .await
                                     .unwrap();
 
-                                file.write_all(&frame.raw_data).await.unwrap();
+                                file.write_all(bytes.as_bytes()).await.unwrap();
+
+                                for (i, frame) in frames.iter().enumerate() {
+                                    let file_path = format!(
+                                        "./images/{}_{}.jpg",
+                                        timestamp.format("%Y-%m-%d_%H-%M-%S%.3f"),
+                                        letters[i]
+                                    );
+
+                                    let mut file = fs::OpenOptions::new()
+                                        .create_new(true)
+                                        .write(true)
+                                        .open(file_path)
+                                        .await
+                                        .unwrap();
+
+                                    file.write_all(&frame.raw_data).await.unwrap();
+                                }
                             }
+
+                            let _ = framed.send("k").await;
                         }
                         Err(err) => println!("Socket closed with error: {:?}", err),
                     }
