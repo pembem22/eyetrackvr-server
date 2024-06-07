@@ -2,6 +2,7 @@ use std::ops::Sub;
 use std::time::{Duration, SystemTime};
 
 use async_broadcast::{broadcast, Receiver, RecvError, Sender};
+use image::{DynamicImage, GenericImageView};
 use onnxruntime::environment::Environment;
 use onnxruntime::tensor::OrtOwnedTensor;
 use onnxruntime::{ndarray, GraphOptimizationLevel, LoggingLevel};
@@ -30,8 +31,8 @@ pub fn start_inference(
     let (l_eye_tx, l_eye_rx) = broadcast::<EyeState>(1);
     let (r_eye_tx, r_eye_rx) = broadcast::<EyeState>(1);
 
-    inference_task(l_rx, &model_path, threads_per_eye, l_eye_tx);
-    inference_task(r_rx, &model_path, threads_per_eye, r_eye_tx);
+    inference_task(l_rx, &model_path, threads_per_eye, l_eye_tx, Eye::L);
+    inference_task(r_rx, &model_path, threads_per_eye, r_eye_tx, Eye::R);
 
     let l_eye_rx = l_eye_rx.map(|es| (Eye::L, es));
     let r_eye_rx = r_eye_rx.map(|es| (Eye::R, es));
@@ -63,6 +64,7 @@ pub fn inference_task(
     model_path: &str,
     threads: usize,
     tx: Sender<EyeState>,
+    eye: Eye,
 ) -> JoinHandle<()> {
     const PY_BETA: f32 = 0.3;
     const PY_FCMIN: f32 = 0.5;
@@ -116,9 +118,17 @@ pub fn inference_task(
                 None => continue,
             };
 
-            let array = ndarray::Array::from_iter(frame.decoded.pixels().map(|p| p.0[0] as f32));
+            let mut raw_frame: DynamicImage = image::DynamicImage::ImageRgb8(frame.decoded);
 
-            let array = array.into_shape((1, 240, 240, 1)).unwrap();
+            if eye == Eye::R {
+                raw_frame = raw_frame.fliph();
+            }
+
+            let cropped_frame = raw_frame.view(60, 40, 128, 128);
+
+            let array = ndarray::Array::from_iter(cropped_frame.pixels().map(|p| p.2[0] as f32));
+
+            let array = array.into_shape((1, 128, 128, 1)).unwrap();
 
             let input_tensor = vec![array];
             let output: Vec<OrtOwnedTensor<f32, _>> = session.run(input_tensor).unwrap();
@@ -133,7 +143,8 @@ pub fn inference_task(
                 .as_secs_f32();
 
             let pitch = filter_pitch.filter_with_timestamp(*output[0], filter_secs);
-            let yaw = filter_yaw.filter_with_timestamp(*output[1], filter_secs);
+            let yaw = filter_yaw.filter_with_timestamp(*output[1], filter_secs)
+                * if eye == Eye::R { -1.0 } else { 1.0 };
             let openness = filter_openness.filter_with_timestamp(*output[2], filter_secs);
 
             let _ = handle.block_on(async {
