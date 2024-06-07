@@ -17,7 +17,7 @@ const ETVR_PACKET_HEADER: [u8; 4] = hex!("FF A0 FF A1");
 
 pub const CAMERA_FRAME_SIZE: u32 = 240;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Eye {
     L,
     R,
