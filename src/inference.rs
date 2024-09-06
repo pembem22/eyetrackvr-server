@@ -125,10 +125,12 @@ pub fn inference_task(
             }
 
             let cropped_frame = raw_frame.view(60, 40, 128, 128);
+                
+            let final_frame = image::imageops::resize(&cropped_frame.to_image(), 64, 64, image::imageops::FilterType::Lanczos3);
 
-            let array = ndarray::Array::from_iter(cropped_frame.pixels().map(|p| p.2[0] as f32));
+            let array = ndarray::Array::from_iter(final_frame.pixels().map(|p| p[0] as f32));
 
-            let array = array.into_shape((1, 128, 128, 1)).unwrap();
+            let array = array.into_shape((1, 64, 64, 1)).unwrap();
 
             let input_tensor = vec![array];
             let output: Vec<OrtOwnedTensor<f32, _>> = session.run(input_tensor).unwrap();
