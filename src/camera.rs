@@ -154,7 +154,7 @@ impl Camera {
                 let client = hyper::Client::new();
                 let result = client.get(http::Uri::try_from(url.clone()).unwrap()).await;
                 if let Err(err) = result {
-                    println!("{:?}", err);
+                    println!("{err:?}");
                     continue 'connect_loop;
                 }
 
@@ -162,7 +162,7 @@ impl Camera {
 
                 if !res.status().is_success() {
                     println!("HTTP request failed with status {}", res.status());
-                    return;
+                    continue 'connect_loop;
                 }
                 let content_type: mime::Mime = res
                     .headers()
@@ -177,7 +177,13 @@ impl Camera {
                 let stream = res.into_body();
                 let mut stream = multipart_stream::parse(stream, boundary.as_str());
                 while let Some(p) = stream.next().await {
-                    let p = p.unwrap();
+                    let p = match p {
+                        Ok(p) => p,
+                        Err(err) => {
+                            println!("Camera stream error:\n{err:?}");
+                            continue 'connect_loop;
+                        }
+                    };
                     let buf = p.body;
 
                     let mut decoder = image::io::Reader::new(Cursor::new(buf.clone()));
