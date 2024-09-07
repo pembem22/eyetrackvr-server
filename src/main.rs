@@ -1,4 +1,5 @@
 use async_broadcast::broadcast;
+use camera_server::start_camera_server;
 use clap::Parser;
 use frame_server::start_frame_server;
 use futures::future::try_join_all;
@@ -7,6 +8,7 @@ use osc_sender::start_osc_sender;
 
 mod app;
 mod camera;
+mod camera_server;
 mod camera_texture;
 mod frame_server;
 mod inference;
@@ -81,6 +83,9 @@ async fn main() -> tokio_serial::Result<()> {
 
     let osc_sender = start_osc_sender(raw_eyes_rx.clone(), args.osc_out_address);
     tasks.push(osc_sender);
+    
+    let camera_server = start_camera_server(l_cam_rx.clone(), r_cam_rx.clone());
+    tasks.push(camera_server);
 
     drop(l_cam_rx);
     drop(r_cam_rx);
