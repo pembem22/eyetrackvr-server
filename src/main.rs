@@ -11,6 +11,8 @@ mod camera;
 mod camera_server;
 mod camera_texture;
 mod frame_server;
+mod gaze_calibration;
+#[cfg(feature = "inference")]
 mod inference;
 mod osc_sender;
 mod ui;
@@ -55,8 +57,7 @@ async fn main() -> tokio_serial::Result<()> {
     l_cam_rx.set_overflow(true);
     r_cam_rx.set_overflow(true);
 
-    let (raw_eyes_tx, raw_eyes_rx) = broadcast::<(EyeState, EyeState)>(1);
-
+    
     let mut app = App::new(l_cam_tx, r_cam_tx);
 
     let mut tasks = Vec::new();
@@ -71,25 +72,34 @@ async fn main() -> tokio_serial::Result<()> {
     tasks.push(server);
 
     if args.inference {
-        let inference = start_inference(
-            l_cam_rx.clone(),
-            r_cam_rx.clone(),
-            raw_eyes_tx.clone(),
-            args.model_path,
-            args.threads_per_eye,
-        );
-        tasks.push(inference);
+        #[cfg(feature = "inference")]
+        {
+            let (raw_eyes_tx, raw_eyes_rx) = broadcast::<(EyeState, EyeState)>(1);
+
+            let inference = start_inference(
+                l_cam_rx.clone(),
+                r_cam_rx.clone(),
+                raw_eyes_tx.clone(),
+                args.model_path,
+                args.threads_per_eye,
+            );
+            tasks.push(inference);
+
+            let osc_sender = start_osc_sender(raw_eyes_rx.clone(), args.osc_out_address);
+            tasks.push(osc_sender);
+
+            drop(raw_eyes_rx);
+        }
+
+        #[cfg(not(feature = "inference"))]
+        println!("Compiled without inference support, ignoring")
     }
 
-    let osc_sender = start_osc_sender(raw_eyes_rx.clone(), args.osc_out_address);
-    tasks.push(osc_sender);
-    
     let camera_server = start_camera_server(l_cam_rx.clone(), r_cam_rx.clone());
     tasks.push(camera_server);
 
     drop(l_cam_rx);
     drop(r_cam_rx);
-    drop(raw_eyes_rx);
 
     let _ = try_join_all(tasks).await.unwrap();
 
