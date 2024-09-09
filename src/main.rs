@@ -3,18 +3,26 @@ use camera_server::start_camera_server;
 use clap::Parser;
 use frame_server::start_frame_server;
 use futures::future::try_join_all;
+#[cfg(feature = "inference")]
 use inference::{start_inference, EyeState};
+#[cfg(feature = "inference")]
 use osc_sender::start_osc_sender;
+#[cfg(feature = "gui")]
+use ui::start_ui;
 
 mod app;
 mod camera;
 mod camera_server;
+#[cfg(feature = "gui")]
 mod camera_texture;
 mod frame_server;
 mod gaze_calibration;
 #[cfg(feature = "inference")]
 mod inference;
+#[cfg(feature = "inference")]
 mod osc_sender;
+mod osc_server;
+#[cfg(feature = "gui")]
 mod ui;
 
 use crate::{app::App, camera::*};
@@ -45,6 +53,10 @@ struct Args {
     /// Number of threads to use for inference per eye
     #[arg(short = 't', default_value_t = 1)]
     threads_per_eye: usize,
+
+    /// Headless mode, no GUI
+    #[arg(short = 'H')]
+    headless: bool,
 }
 
 #[tokio::main]
@@ -57,19 +69,27 @@ async fn main() -> tokio_serial::Result<()> {
     l_cam_rx.set_overflow(true);
     r_cam_rx.set_overflow(true);
 
-    
     let mut app = App::new(l_cam_tx, r_cam_tx);
 
     let mut tasks = Vec::new();
 
     let (l_camera, r_camera) = app.start_cameras(args.l_camera_url, args.r_camera_url)?;
-    let ui = app.start_ui(l_cam_rx.clone(), r_cam_rx.clone());
     let server = start_frame_server(l_cam_rx.clone(), r_cam_rx.clone());
 
     tasks.push(l_camera);
     tasks.push(r_camera);
-    tasks.push(ui);
     tasks.push(server);
+
+    if !args.headless {
+        #[cfg(feature = "gui")]
+        {
+            let ui = start_ui(l_cam_rx.clone(), r_cam_rx.clone());
+            tasks.push(ui);
+        }
+
+        #[cfg(not(feature = "inference"))]
+        println!("Compiled without GUI support, starting headless anyway")
+    }
 
     if args.inference {
         #[cfg(feature = "inference")]

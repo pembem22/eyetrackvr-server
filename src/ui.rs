@@ -1,7 +1,11 @@
+use crate::{camera_texture::CameraTexture, ui, Frame};
+use async_broadcast::Receiver;
 use imgui::*;
 use imgui_wgpu::{Renderer, RendererConfig};
 use pollster::block_on;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
+use tokio::task::JoinHandle;
 use winit::{
     dpi::LogicalSize,
     event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent},
@@ -282,4 +286,30 @@ impl UI {
                 .handle_event(self.imgui.io_mut(), &self.window, &event);
         });
     }
+}
+
+pub fn start_ui(l_rx: Receiver<Frame>, r_rx: Receiver<Frame>) -> JoinHandle<()> {
+    tokio::task::spawn_blocking(|| {
+        let mut ui = ui::UI::new();
+
+        let l_texture = CameraTexture::new(&mut ui);
+        let r_texture = CameraTexture::new(&mut ui);
+
+        let l_rx = Arc::new(Mutex::new(l_rx));
+        let r_rx = Arc::new(Mutex::new(r_rx));
+
+        ui.run(move |imgui, queue, renderer| {
+            let mut l_rx = l_rx.lock().unwrap();
+            let mut r_rx = r_rx.lock().unwrap();
+
+            l_texture.update_texture(&mut l_rx, queue, renderer);
+            r_texture.update_texture(&mut r_rx, queue, renderer);
+
+            imgui.window("Hello!").build(move || {
+                l_texture.build(imgui);
+                imgui.same_line();
+                r_texture.build(imgui);
+            });
+        });
+    })
 }
