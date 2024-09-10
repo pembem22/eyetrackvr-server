@@ -16,12 +16,10 @@ mod camera_server;
 #[cfg(feature = "gui")]
 mod camera_texture;
 mod frame_server;
-mod gaze_calibration;
 #[cfg(feature = "inference")]
 mod inference;
 #[cfg(feature = "inference")]
 mod osc_sender;
-mod osc_server;
 #[cfg(feature = "gui")]
 mod ui;
 
