@@ -15,6 +15,8 @@ const BAUD_RATE: u32 = 3000000;
 
 const ETVR_PACKET_HEADER: [u8; 4] = hex!("FF A0 FF A1");
 
+const HTTP_CONNECTION_TIMEOUT: Duration = Duration::from_secs(1);
+
 pub const CAMERA_FRAME_SIZE: u32 = 240;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -151,7 +153,10 @@ impl Camera {
                 }
                 reconnect = true;
 
-                let client = hyper::Client::new();
+                hyper::Client::new();
+                let client = hyper::Client::builder()
+                    .pool_idle_timeout(HTTP_CONNECTION_TIMEOUT)
+                    .build_http::<hyper::Body>();
                 let result = client.get(http::Uri::try_from(url.clone()).unwrap()).await;
                 if let Err(err) = result {
                     println!("{err:?}");
