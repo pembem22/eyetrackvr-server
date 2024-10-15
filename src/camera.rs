@@ -54,10 +54,24 @@ impl Camera {
         let sender = self.sender.clone();
 
         let future = async move {
+            let mut reconnect = false;
+
             'init: loop {
-                let mut port = tokio_serial::new(tty_path.clone(), BAUD_RATE)
-                    .open_native_async()
-                    .unwrap();
+                if reconnect {
+                    println!("Reconnecting in a sec to {tty_path}");
+                    sleep(Duration::from_secs(1)).await;
+                }
+                reconnect = true;
+
+                let mut port = 
+                match tokio_serial::new(tty_path.clone(), BAUD_RATE)
+                    .open_native_async() {
+                        Ok(port) => port,
+                        Err(error) => {
+                            println!("Serial open error: {:?}", error.kind());
+                            continue 'init;
+                        }
+                    };
                 let mut remaining_bytes = Vec::new();
 
                 'find_packet: loop {
@@ -66,7 +80,7 @@ impl Camera {
                     match port.read_exact(&mut remaining_bytes[read_position..]).await {
                         Ok(..) => (),
                         Err(error) => {
-                            println!("Serial error: {}", error.kind());
+                            println!("Serial read error: {}", error.kind());
                             continue 'init;
                         }
                     };
