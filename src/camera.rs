@@ -56,27 +56,29 @@ impl Camera {
         let future = async move {
             let mut reconnect = false;
 
-            'init: loop {
-                if reconnect {
-                    println!("Reconnecting in a sec to {tty_path}");
-                    sleep(Duration::from_secs(1)).await;
-                }
-                reconnect = true;
+            if reconnect {
+                println!("Reconnecting in a sec to {tty_path}");
+                sleep(Duration::from_secs(1)).await;
+            }
+            reconnect = true;
 
-                let mut port = 
-                match tokio_serial::new(tty_path.clone(), BAUD_RATE)
-                    .open_native_async() {
-                        Ok(port) => port,
-                        Err(error) => {
-                            println!("Serial open error: {:?}", error.kind());
-                            continue 'init;
-                        }
-                    };
-                let mut remaining_bytes = Vec::new();
+            let mut port = 
+            match tokio_serial::new(tty_path.clone(), BAUD_RATE)
+                .open_native_async() {
+                    Ok(port) => port,
+                    Err(error) => {
+                        println!("Serial open error: {:?}", error.kind());
+                        return;
+                        // continue 'init;
+                    }
+                };
+            let mut remaining_bytes = Vec::new();
+            'init: loop {
 
                 'find_packet: loop {
                     remaining_bytes.resize(remaining_bytes.len() + 2048, 0);
                     let read_position = remaining_bytes.len() - 2048;
+                    
                     match port.read_exact(&mut remaining_bytes[read_position..]).await {
                         Ok(..) => (),
                         Err(error) => {
@@ -102,8 +104,8 @@ impl Camera {
                     match port.read_exact(&mut buf[to_copy..]).await {
                         Ok(..) => (),
                         Err(error) => {
-                            println!("Serial error: {}", error.kind());
-                            continue 'init;
+                            println!("Warning: failed to read exact frame: {}", error.kind());
+                            // continue 'init;
                         }
                     };
 
@@ -121,8 +123,8 @@ impl Camera {
                     match port.read_exact(&mut buf[to_copy..]).await {
                         Ok(..) => (),
                         Err(error) => {
-                            println!("Serial error: {}", error.kind());
-                            continue 'init;
+                            println!("Warning: failed to read exact frame: {}", error.kind());
+                            // continue 'init;
                         }
                     };
 
@@ -132,8 +134,8 @@ impl Camera {
                     let image = decoder.decode();
 
                     if image.is_err() {
-                        println!("Failed to decode image");
-                        continue 'init;
+                        println!("Warning: failed to decode image");
+                        continue;
                     }
 
                     let image = image.unwrap().as_rgb8().unwrap().to_owned();

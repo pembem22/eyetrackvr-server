@@ -1,3 +1,5 @@
+use std::time::{Duration, SystemTime};
+
 use async_broadcast::Receiver;
 use image::DynamicImage;
 use imgui_wgpu::{Texture, TextureConfig};
@@ -6,6 +8,8 @@ use crate::{ui, Frame, CAMERA_FRAME_SIZE};
 
 #[derive(Clone, Copy)]
 pub struct CameraTexture {
+    last_delta: Duration,
+    last_timestamp: SystemTime,
     texture_id: imgui::TextureId,
 }
 
@@ -25,12 +29,14 @@ impl CameraTexture {
         let texture = Texture::new(&ui.device, &ui.renderer, texture_config);
 
         CameraTexture {
+            last_delta: Duration::ZERO,
+            last_timestamp: SystemTime::now(),
             texture_id: ui.renderer.textures.insert(texture),
         }
     }
 
     pub fn update_texture(
-        self,
+        &mut self,
         rx: &mut Receiver<Frame>,
         queue: &wgpu::Queue,
         renderer: &mut imgui_wgpu::Renderer,
@@ -56,6 +62,9 @@ impl CameraTexture {
             CAMERA_FRAME_SIZE,
             CAMERA_FRAME_SIZE,
         );
+
+        self.last_delta = frame.timestamp.duration_since(self.last_timestamp).unwrap();
+        self.last_timestamp = frame.timestamp;
     }
 
     pub fn build(self, ui: &imgui::Ui) {
@@ -66,5 +75,9 @@ impl CameraTexture {
         .uv0([1.0, 0.0])
         .uv1([0.0, 1.0])
         .build(ui);
+    }
+
+    pub fn get_fps(self) -> f32 {
+        1.0 / self.last_delta.as_secs_f32()
     }
 }

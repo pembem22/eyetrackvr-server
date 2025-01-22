@@ -35,6 +35,10 @@ struct Args {
     /// Right camera URL
     #[arg(short = 'r', default_value = "http://openiristracker_r.local/")]
     r_camera_url: String,
+    
+    /// Face camera URL
+    #[arg(short = 'f', default_value = "http://openiristracker_face.local/")]
+    f_camera_url: String,
 
     /// Enable inference
     #[arg(short = 'I')]
@@ -63,25 +67,28 @@ async fn main() -> tokio_serial::Result<()> {
 
     let (l_cam_tx, mut l_cam_rx) = broadcast::<Frame>(1);
     let (r_cam_tx, mut r_cam_rx) = broadcast::<Frame>(1);
+    let (f_cam_tx, mut f_cam_rx) = broadcast::<Frame>(1);
 
     l_cam_rx.set_overflow(true);
     r_cam_rx.set_overflow(true);
+    f_cam_rx.set_overflow(true);
 
-    let mut app = App::new(l_cam_tx, r_cam_tx);
+    let mut app = App::new(l_cam_tx, r_cam_tx, f_cam_tx);
 
     let mut tasks = Vec::new();
 
-    let (l_camera, r_camera) = app.start_cameras(args.l_camera_url, args.r_camera_url)?;
+    let (l_camera, r_camera, f_camera) = app.start_cameras(args.l_camera_url, args.r_camera_url, args.f_camera_url)?;
     let server = start_frame_server(l_cam_rx.clone(), r_cam_rx.clone());
 
     tasks.push(l_camera);
     tasks.push(r_camera);
+    tasks.push(f_camera);
     tasks.push(server);
 
     if !args.headless {
         #[cfg(feature = "gui")]
         {
-            let ui = start_ui(l_cam_rx.clone(), r_cam_rx.clone());
+            let ui = start_ui(l_cam_rx.clone(), r_cam_rx.clone(), f_cam_rx.clone());
             tasks.push(ui);
         }
 
@@ -113,11 +120,12 @@ async fn main() -> tokio_serial::Result<()> {
         println!("Compiled without inference support, ignoring")
     }
 
-    let camera_server = start_camera_server(l_cam_rx.clone(), r_cam_rx.clone());
+    let camera_server = start_camera_server(l_cam_rx.clone(), f_cam_rx.clone());
     tasks.push(camera_server);
 
     drop(l_cam_rx);
     drop(r_cam_rx);
+    drop(f_cam_rx);
 
     let _ = try_join_all(tasks).await.unwrap();
 

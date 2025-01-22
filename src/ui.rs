@@ -155,9 +155,9 @@ impl UI {
         }
     }
 
-    pub fn run<F: Fn(&imgui::Ui, &wgpu::Queue, &mut imgui_wgpu::Renderer) + 'static>(
+    pub fn run<F: FnMut(&imgui::Ui, &wgpu::Queue, &mut imgui_wgpu::Renderer) + 'static>(
         mut self,
-        render: F,
+        mut render: F,
     ) {
         let clear_color = wgpu::Color {
             r: 0.1,
@@ -288,27 +288,49 @@ impl UI {
     }
 }
 
-pub fn start_ui(l_rx: Receiver<Frame>, r_rx: Receiver<Frame>) -> JoinHandle<()> {
+pub fn start_ui(l_rx: Receiver<Frame>, r_rx: Receiver<Frame>, f_rx: Receiver<Frame>) -> JoinHandle<()> {
     tokio::task::spawn_blocking(|| {
         let mut ui = ui::UI::new();
 
-        let l_texture = CameraTexture::new(&mut ui);
-        let r_texture = CameraTexture::new(&mut ui);
+        let mut l_texture = CameraTexture::new(&mut ui);
+        let mut r_texture = CameraTexture::new(&mut ui);
+        let mut f_texture = CameraTexture::new(&mut ui);
 
         let l_rx = Arc::new(Mutex::new(l_rx));
         let r_rx = Arc::new(Mutex::new(r_rx));
+        let f_rx = Arc::new(Mutex::new(f_rx));
 
         ui.run(move |imgui, queue, renderer| {
             let mut l_rx = l_rx.lock().unwrap();
             let mut r_rx = r_rx.lock().unwrap();
+            let mut f_rx = f_rx.lock().unwrap();
 
             l_texture.update_texture(&mut l_rx, queue, renderer);
             r_texture.update_texture(&mut r_rx, queue, renderer);
+            f_texture.update_texture(&mut f_rx, queue, renderer);
 
-            imgui.window("Hello!").build(move || {
+            imgui.window("Camera Feeds").build(move || {
+                let group = imgui.begin_group();
                 l_texture.build(imgui);
+                let l_fps = l_texture.get_fps();
+                imgui.text(format!("Left Eye, fps: {l_fps:03.1}"));
+                group.end();
+
                 imgui.same_line();
+                
+                let group = imgui.begin_group();
                 r_texture.build(imgui);
+                let r_fps = r_texture.get_fps();
+                imgui.text(format!("Right Eye, fps: {r_fps:03.1}"));
+                group.end();
+                
+                imgui.same_line();
+                
+                let group = imgui.begin_group();
+                f_texture.build(imgui);
+                let f_fps = f_texture.get_fps();
+                imgui.text(format!("Face, fps: {f_fps:03.1}"));
+                group.end();
             });
         });
     })
