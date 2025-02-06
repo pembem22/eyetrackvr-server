@@ -6,7 +6,11 @@ use std::{
 use async_broadcast::Sender;
 use hex_literal::hex;
 use hyper::http;
-use image::RgbImage;
+use image::{GenericImageView, RgbImage};
+use nokhwa::{
+    pixel_format::RgbFormat,
+    utils::{CameraIndex, RequestedFormat, RequestedFormatType},
+};
 use tokio::{io::AsyncReadExt, task::JoinHandle, time::sleep};
 use tokio_serial::SerialPortBuilderExt;
 use tokio_stream::StreamExt;
@@ -45,6 +49,8 @@ impl Camera {
     pub fn start(&mut self, path: String) -> tokio_serial::Result<JoinHandle<()>> {
         if path.starts_with("COM") {
             self.connect_serial(path)
+        } else if path.starts_with("UVC") {
+            self.connect_uvc(path.strip_prefix("UVC").unwrap().parse().unwrap())
         } else {
             self.connect_http(path)
         }
@@ -227,6 +233,55 @@ impl Camera {
 
                     let _ = sender.broadcast_direct(new_frame).await;
                 }
+            }
+        };
+
+        Ok(tokio::spawn(future))
+    }
+
+    fn connect_uvc(&mut self, uvc_index: u32) -> tokio_serial::Result<JoinHandle<()>> {
+        let sender = self.sender.clone();
+
+        let future = async move {
+            let index = CameraIndex::Index(uvc_index);
+            let requested =
+                RequestedFormat::new::<RgbFormat>(RequestedFormatType::AbsoluteHighestFrameRate);
+            println!("Requested format: {requested:?}");
+            let mut camera = nokhwa::Camera::new(index, requested).unwrap();
+
+            camera.open_stream().unwrap();
+
+            println!(
+                "Connected to a UVC camera fps:{} {:?}",
+                camera.frame_rate(),
+                camera.frame_format()
+            );
+
+            while let Ok(frame_raw) = camera.frame_raw() {
+                let mut decoder = image::io::Reader::new(Cursor::new(&frame_raw));
+                decoder.set_format(image::ImageFormat::Jpeg);
+
+                let image = decoder.decode();
+
+                if image.is_err() {
+                    println!("Failed to decode image");
+                    continue;
+                }
+
+                let image = image
+                    .unwrap()
+                    .as_rgb8()
+                    .unwrap()
+                    .view(0, 0, 240, 240)
+                    .to_image();
+
+                let new_frame = Frame {
+                    timestamp: SystemTime::now(),
+                    raw_data: Vec::from(frame_raw),
+                    decoded: image,
+                };
+
+                let _ = sender.try_broadcast(new_frame);
             }
         };
 

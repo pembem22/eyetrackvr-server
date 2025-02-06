@@ -19,7 +19,8 @@ imgui-wgpu = { version = "0.24.0", optional = true }
 imgui-winit-support = { version = "0.11.0", optional = true }
 mime = "0.3.17"
 multipart-stream = "0.1.2"
-one-euro-rs = "0.2.0"
+nokhwa = { version = "0.10.7", default-features = false, features = ["input-native"]}
+one-euro-rs = { git = "https://github.com/pembem22/one-euro-rs.git", branch = "develop" }
 onnxruntime = { version = "0.0.14", optional = true }
 pollster = "0.3.0"
 rosc = "0.10.1"
