@@ -13,11 +13,13 @@ pub fn start_osc_sender(
         let sock = UdpSocket::bind("0.0.0.0:0").await.unwrap();
         sock.connect(osc_out_address).await.unwrap();
 
-        const VRCHAT_NATIVE: bool = false;
+        const VRCHAT_NATIVE: bool = true;
         const VRCFT_V2: bool = true;
 
         while let Some((l, r)) = rx.next().await {
             if VRCHAT_NATIVE {
+                const SEND_EYES_CLOSED: bool = true;
+
                 sock.send(
                     &encoder::encode(&OscPacket::Message(OscMessage {
                         addr: "/tracking/eye/LeftRightPitchYaw".to_string(),
@@ -32,14 +34,16 @@ pub fn start_osc_sender(
                 )
                 .await.unwrap();
 
-                sock.send(
-                    &encoder::encode(&OscPacket::Message(OscMessage {
-                        addr: "/tracking/eye/EyesClosedAmount".to_string(),
-                        args: vec![OscType::Float(1.0 - (l.openness + r.openness) / 2.0)],
-                    }))
-                    .unwrap(),
-                )
-                .await.unwrap();
+                if SEND_EYES_CLOSED {
+                    sock.send(
+                        &encoder::encode(&OscPacket::Message(OscMessage {
+                            addr: "/tracking/eye/EyesClosedAmount".to_string(),
+                            args: vec![OscType::Float(1.0 - (l.openness + r.openness) / 2.0)],
+                        }))
+                        .unwrap(),
+                    )
+                    .await.unwrap();
+                }
             }
 
             if VRCFT_V2 {

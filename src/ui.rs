@@ -292,9 +292,9 @@ pub fn start_ui(l_rx: Receiver<Frame>, r_rx: Receiver<Frame>, f_rx: Receiver<Fra
     tokio::task::spawn_blocking(|| {
         let mut ui = ui::UI::new();
 
-        let mut l_texture = CameraTexture::new(&mut ui);
-        let mut r_texture = CameraTexture::new(&mut ui);
-        let mut f_texture = CameraTexture::new(&mut ui);
+        let mut l_texture = CameraTexture::new(&mut ui, Some("L texture"));
+        let mut r_texture = CameraTexture::new(&mut ui, Some("R texture"));
+        let mut f_texture = CameraTexture::new(&mut ui, Some("F texture"));
 
         let l_rx = Arc::new(Mutex::new(l_rx));
         let r_rx = Arc::new(Mutex::new(r_rx));

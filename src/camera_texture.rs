@@ -14,14 +14,14 @@ pub struct CameraTexture {
 }
 
 impl CameraTexture {
-    pub fn new(ui: &mut ui::UI) -> CameraTexture {
+    pub fn new(ui: &mut ui::UI, label: Option<&str>) -> CameraTexture {
         let texture_config: TextureConfig<'_> = TextureConfig {
             size: wgpu::Extent3d {
                 width: CAMERA_FRAME_SIZE,
                 height: CAMERA_FRAME_SIZE,
                 ..Default::default()
             },
-            label: Some("lenna texture"),
+            label,
             format: Some(wgpu::TextureFormat::Rgba8UnormSrgb),
             ..Default::default()
         };

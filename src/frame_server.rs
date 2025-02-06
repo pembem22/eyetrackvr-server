@@ -58,7 +58,7 @@ pub fn start_frame_server(l_rx: Receiver<Frame>, r_rx: Receiver<Frame>) -> JoinH
                                 letters.push('R');
                             }
 
-                            for _ in 0..5 {
+                            for _ in 0..3 {
                                 // Await for a frame from for each eye.
                                 let mut frames =
                                     join_all(cameras.iter_mut().map(|c| c.recv())).await;

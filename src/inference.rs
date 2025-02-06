@@ -124,7 +124,7 @@ pub fn inference_task(
                 raw_frame = raw_frame.fliph();
             }
 
-            let cropped_frame = raw_frame.view(60, 40, 128, 128);
+            let cropped_frame = raw_frame.view(30, 30, 180, 180);
                 
             let final_frame = image::imageops::resize(&cropped_frame.to_image(), 64, 64, image::imageops::FilterType::Lanczos3);
 
