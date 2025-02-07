@@ -51,6 +51,16 @@ pub fn start_osc_sender(
                 let l_pitch_norm = l.pitch.to_radians().sin();
                 let r_yaw_norm = r.yaw.to_radians().sin();
                 let r_pitch_norm = r.pitch.to_radians().sin();
+                let pitch_norm = ((l.pitch + r.pitch) / 2.0).to_radians().sin();
+
+                sock.send(
+                    &encoder::encode(&OscPacket::Message(OscMessage {
+                        addr: "/avatar/parameters/FT/v2/EyeY".to_string(),
+                        args: vec![OscType::Float(-pitch_norm)],
+                    }))
+                    .unwrap(),
+                )
+                .await.unwrap();
                 
                 sock.send(
                     &encoder::encode(&OscPacket::Message(OscMessage {
