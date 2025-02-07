@@ -3,9 +3,7 @@ use std::time::{Duration, SystemTime};
 
 use async_broadcast::{broadcast, Receiver, RecvError, Sender};
 use image::{DynamicImage, GenericImageView};
-use onnxruntime::environment::Environment;
-use onnxruntime::tensor::OrtOwnedTensor;
-use onnxruntime::{ndarray, GraphOptimizationLevel, LoggingLevel};
+use ort::session::{builder::GraphOptimizationLevel, Session};
 use tokio::runtime::Handle;
 use tokio::task::JoinHandle;
 
@@ -80,21 +78,13 @@ pub fn inference_task(
     let model_path = model_path.to_owned();
 
     tokio::task::spawn_blocking(move || {
-        // Cannot share the environment between threads.
-        let environment = Environment::builder()
-            .with_name("test")
-            .with_log_level(LoggingLevel::Verbose)
-            .build()
-            .unwrap();
-
-        let mut session = environment
-            .new_session_builder()
+        let model = Session::builder()
             .unwrap()
-            .with_optimization_level(GraphOptimizationLevel::All)
+            .with_optimization_level(GraphOptimizationLevel::Level3)
             .unwrap()
-            .with_number_threads(threads.try_into().unwrap())
+            .with_intra_threads(threads)
             .unwrap()
-            .with_model_from_file(model_path)
+            .commit_from_file(model_path)
             .unwrap();
 
         let handle = Handle::current();
@@ -125,18 +115,22 @@ pub fn inference_task(
             }
 
             let cropped_frame = raw_frame.view(30, 30, 180, 180);
-                
-            let final_frame = image::imageops::resize(&cropped_frame.to_image(), 64, 64, image::imageops::FilterType::Lanczos3);
+
+            let final_frame = image::imageops::resize(
+                &cropped_frame.to_image(),
+                64,
+                64,
+                image::imageops::FilterType::Lanczos3,
+            );
 
             let array = ndarray::Array::from_iter(final_frame.pixels().map(|p| p[0] as f32));
 
-            let array = array.into_shape((1, 64, 64, 1)).unwrap();
+            let array = array.to_shape((1, 64, 64, 1)).unwrap();
 
-            let input_tensor = vec![array];
-            let output: Vec<OrtOwnedTensor<f32, _>> = session.run(input_tensor).unwrap();
 
-            // Collecting with iterator works, using by index throws out of bounds...
-            let output = output[0].iter().collect::<Vec<_>>();
+            let outputs = model.run(ort::inputs![&array].unwrap()).unwrap();
+            let output = outputs.iter().next().unwrap().1;
+            let output = output.try_extract_tensor::<f32>().unwrap();
 
             let filter_secs = frame
                 .timestamp
@@ -144,10 +138,10 @@ pub fn inference_task(
                 .unwrap()
                 .as_secs_f32();
 
-            let pitch = filter_pitch.filter_with_timestamp(*output[0], filter_secs);
-            let yaw = filter_yaw.filter_with_timestamp(*output[1], filter_secs)
+            let pitch = filter_pitch.filter_with_timestamp(output[0], filter_secs);
+            let yaw = filter_yaw.filter_with_timestamp(output[1], filter_secs)
                 * if eye == Eye::R { -1.0 } else { 1.0 };
-            let openness = filter_openness.filter_with_timestamp(*output[2], filter_secs);
+            let openness = filter_openness.filter_with_timestamp(output[2], filter_secs);
 
             let _ = handle.block_on(async {
                 tx.broadcast_direct(EyeState {
