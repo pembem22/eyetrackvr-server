@@ -38,3 +38,6 @@ winit = { version = "0.27.5", optional = true }
 default = ["inference", "gui"]
 inference = ["dep:ort"]
 gui = ["dep:imgui", "dep:imgui-wgpu", "dep:imgui-winit-support", "dep:wgpu", "dep:winit"]
+
+[patch.crates-io]
+mio-serial = { git = "https://github.com/pembem22/mio-serial.git", branch = "fix-stop-bits" }

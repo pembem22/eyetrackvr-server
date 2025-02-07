@@ -1978,8 +1978,7 @@ dependencies = [
 [[package]]
 name = "mio-serial"
 version = "5.0.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "029e1f407e261176a983a6599c084efd322d9301028055c87174beac71397ba3"
+source = "git+https://github.com/pembem22/mio-serial.git?branch=fix-stop-bits#4b6a718a2c186dd7f7275c8844034aade2fb6ff2"
 dependencies = [
  "log",
  "mio 1.0.3",
