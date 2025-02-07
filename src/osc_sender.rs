@@ -49,7 +49,7 @@ pub fn start_osc_sender(
             if VRCFT_V2 {
                 sock.send(
                     &encoder::encode(&OscPacket::Message(OscMessage {
-                        addr: "/avatar/parameters/v2/EyeLeftX".to_string(),
+                        addr: "/avatar/parameters/FT/v2/EyeLeftX".to_string(),
                         args: vec![OscType::Float(l.yaw / 90.0)],
                     }))
                     .unwrap(),
@@ -57,7 +57,7 @@ pub fn start_osc_sender(
                 .await.unwrap();
                 sock.send(
                     &encoder::encode(&OscPacket::Message(OscMessage {
-                        addr: "/avatar/parameters/v2/EyeLeftY".to_string(),
+                        addr: "/avatar/parameters/FT/v2/EyeLeftY".to_string(),
                         args: vec![OscType::Float(-l.pitch / 90.0)],
                     }))
                     .unwrap(),
@@ -65,7 +65,7 @@ pub fn start_osc_sender(
                 .await.unwrap();
                 sock.send(
                     &encoder::encode(&OscPacket::Message(OscMessage {
-                        addr: "/avatar/parameters/v2/EyeLidLeft".to_string(),
+                        addr: "/avatar/parameters/FT/v2/EyeLidLeft".to_string(),
                         args: vec![OscType::Float(l.openness * 0.75)],
                     }))
                     .unwrap(),
@@ -74,7 +74,7 @@ pub fn start_osc_sender(
 
                 sock.send(
                     &encoder::encode(&OscPacket::Message(OscMessage {
-                        addr: "/avatar/parameters/v2/EyeRightX".to_string(),
+                        addr: "/avatar/parameters/FT/v2/EyeRightX".to_string(),
                         args: vec![OscType::Float(r.yaw / 90.0)],
                     }))
                     .unwrap(),
@@ -82,7 +82,7 @@ pub fn start_osc_sender(
                 .await.unwrap();
                 sock.send(
                     &encoder::encode(&OscPacket::Message(OscMessage {
-                        addr: "/avatar/parameters/v2/EyeRightY".to_string(),
+                        addr: "/avatar/parameters/FT/v2/EyeRightY".to_string(),
                         args: vec![OscType::Float(-r.pitch / 90.0)],
                     }))
                     .unwrap(),
@@ -90,7 +90,7 @@ pub fn start_osc_sender(
                 .await.unwrap();
                 sock.send(
                     &encoder::encode(&OscPacket::Message(OscMessage {
-                        addr: "/avatar/parameters/v2/EyeLidRight".to_string(),
+                        addr: "/avatar/parameters/FT/v2/EyeLidRight".to_string(),
                         args: vec![OscType::Float(r.openness * 0.75)],
                     }))
                     .unwrap(),
