@@ -1,5 +1,7 @@
+use std::time::SystemTime;
+
 use async_broadcast::Receiver;
-use rosc::{encoder, OscMessage, OscPacket, OscType};
+use rosc::{encoder, OscBundle, OscMessage, OscPacket, OscType};
 use tokio::net::UdpSocket;
 use tokio_stream::StreamExt;
 
@@ -32,7 +34,8 @@ pub fn start_osc_sender(
                     }))
                     .unwrap(),
                 )
-                .await.unwrap();
+                .await
+                .unwrap();
 
                 if SEND_EYES_CLOSED {
                     sock.send(
@@ -42,7 +45,8 @@ pub fn start_osc_sender(
                         }))
                         .unwrap(),
                     )
-                    .await.unwrap();
+                    .await
+                    .unwrap();
                 }
             }
 
@@ -54,63 +58,41 @@ pub fn start_osc_sender(
                 let pitch_norm = ((l.pitch + r.pitch) / 2.0).to_radians().sin();
 
                 sock.send(
-                    &encoder::encode(&OscPacket::Message(OscMessage {
-                        addr: "/avatar/parameters/FT/v2/EyeY".to_string(),
-                        args: vec![OscType::Float(-pitch_norm)],
+                    &encoder::encode(&OscPacket::Bundle(OscBundle {
+                        timetag: SystemTime::now().try_into().unwrap(),
+                        content: vec![
+                            OscPacket::Message(OscMessage {
+                                addr: "/avatar/parameters/FT/v2/EyeY".to_string(),
+                                args: vec![OscType::Float(-pitch_norm)],
+                            }),
+                            OscPacket::Message(OscMessage {
+                                addr: "/avatar/parameters/FT/v2/EyeLeftX".to_string(),
+                                args: vec![OscType::Float(l_yaw_norm)],
+                            }),
+                            OscPacket::Message(OscMessage {
+                                addr: "/avatar/parameters/FT/v2/EyeLeftY".to_string(),
+                                args: vec![OscType::Float(-l_pitch_norm)],
+                            }),
+                            OscPacket::Message(OscMessage {
+                                addr: "/avatar/parameters/FT/v2/EyeLidLeft".to_string(),
+                                args: vec![OscType::Float(l.openness * 0.75)],
+                            }),
+                            OscPacket::Message(OscMessage {
+                                addr: "/avatar/parameters/FT/v2/EyeRightX".to_string(),
+                                args: vec![OscType::Float(r_yaw_norm)],
+                            }),
+                            OscPacket::Message(OscMessage {
+                                addr: "/avatar/parameters/FT/v2/EyeRightY".to_string(),
+                                args: vec![OscType::Float(-r_pitch_norm)],
+                            }),
+                            OscPacket::Message(OscMessage {
+                                addr: "/avatar/parameters/FT/v2/EyeLidRight".to_string(),
+                                args: vec![OscType::Float(r.openness * 0.75)],
+                            }),
+                        ],
                     }))
                     .unwrap(),
-                )
-                .await.unwrap();
-                
-                sock.send(
-                    &encoder::encode(&OscPacket::Message(OscMessage {
-                        addr: "/avatar/parameters/FT/v2/EyeLeftX".to_string(),
-                        args: vec![OscType::Float(l_yaw_norm)],
-                    }))
-                    .unwrap(),
-                )
-                .await.unwrap();
-                sock.send(
-                    &encoder::encode(&OscPacket::Message(OscMessage {
-                        addr: "/avatar/parameters/FT/v2/EyeLeftY".to_string(),
-                        args: vec![OscType::Float(-l_pitch_norm)],
-                    }))
-                    .unwrap(),
-                )
-                .await.unwrap();
-                sock.send(
-                    &encoder::encode(&OscPacket::Message(OscMessage {
-                        addr: "/avatar/parameters/FT/v2/EyeLidLeft".to_string(),
-                        args: vec![OscType::Float(l.openness)],
-                    }))
-                    .unwrap(),
-                )
-                .await.unwrap();
-
-                sock.send(
-                    &encoder::encode(&OscPacket::Message(OscMessage {
-                        addr: "/avatar/parameters/FT/v2/EyeRightX".to_string(),
-                        args: vec![OscType::Float(r_yaw_norm)],
-                    }))
-                    .unwrap(),
-                )
-                .await.unwrap();
-                sock.send(
-                    &encoder::encode(&OscPacket::Message(OscMessage {
-                        addr: "/avatar/parameters/FT/v2/EyeRightY".to_string(),
-                        args: vec![OscType::Float(-r_pitch_norm)],
-                    }))
-                    .unwrap(),
-                )
-                .await.unwrap();
-                sock.send(
-                    &encoder::encode(&OscPacket::Message(OscMessage {
-                        addr: "/avatar/parameters/FT/v2/EyeLidRight".to_string(),
-                        args: vec![OscType::Float(r.openness)],
-                    }))
-                    .unwrap(),
-                )
-                .await.unwrap();
+                ).await.unwrap();
             }
         }
     })
