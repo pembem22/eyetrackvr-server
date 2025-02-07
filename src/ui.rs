@@ -23,6 +23,8 @@ pub(crate) struct UI {
     imgui: imgui::Context,
     platform: imgui_winit_support::WinitPlatform,
     pub renderer: imgui_wgpu::Renderer,
+
+    pause: bool,
 }
 
 impl UI {
@@ -152,6 +154,7 @@ impl UI {
             imgui,
             platform,
             renderer,
+            pause: false,
         }
     }
 
@@ -180,6 +183,13 @@ impl UI {
                     event: WindowEvent::Resized(size),
                     ..
                 } => {
+                    if size.width == 0 || size.height == 0 {
+                        self.pause = true;
+                        return;
+                    }
+
+                    self.pause = false;
+
                     let surface_desc = wgpu::SurfaceConfiguration {
                         usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
                         format: wgpu::TextureFormat::Bgra8UnormSrgb,
@@ -231,7 +241,9 @@ impl UI {
                         .expect("Failed to prepare frame");
                     let ui = self.imgui.frame();
 
-                    render(ui, &self.queue, &mut self.renderer);
+                    if !self.pause {
+                        render(ui, &self.queue, &mut self.renderer);
+                    }
 
                     // {
                     //     let size = [width as f32, height as f32];
@@ -288,7 +300,11 @@ impl UI {
     }
 }
 
-pub fn start_ui(l_rx: Receiver<Frame>, r_rx: Receiver<Frame>, f_rx: Receiver<Frame>) -> JoinHandle<()> {
+pub fn start_ui(
+    l_rx: Receiver<Frame>,
+    r_rx: Receiver<Frame>,
+    f_rx: Receiver<Frame>,
+) -> JoinHandle<()> {
     tokio::task::spawn_blocking(|| {
         let mut ui = ui::UI::new();
 
@@ -317,15 +333,15 @@ pub fn start_ui(l_rx: Receiver<Frame>, r_rx: Receiver<Frame>, f_rx: Receiver<Fra
                 group.end();
 
                 imgui.same_line();
-                
+
                 let group = imgui.begin_group();
                 r_texture.build(imgui);
                 let r_fps = r_texture.get_fps();
                 imgui.text(format!("Right Eye, fps: {r_fps:03.1}"));
                 group.end();
-                
+
                 imgui.same_line();
-                
+
                 let group = imgui.begin_group();
                 f_texture.build(imgui);
                 let f_fps = f_texture.get_fps();
