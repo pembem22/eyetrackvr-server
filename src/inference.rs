@@ -131,6 +131,7 @@ pub fn inference_task(
             let outputs = model.run(ort::inputs![&array].unwrap()).unwrap();
             let output = outputs.iter().next().unwrap().1;
             let output = output.try_extract_tensor::<f32>().unwrap();
+            let output = output.flatten();
 
             let filter_secs = frame
                 .timestamp
