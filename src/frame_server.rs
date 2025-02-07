@@ -3,7 +3,7 @@ use std::time::SystemTime;
 use async_broadcast::Receiver;
 use futures::{future::join_all, SinkExt};
 use serde_json::Value;
-use tokio::{fs, io::AsyncWriteExt, net::TcpListener, task::JoinHandle};
+use tokio::{fs::{self, create_dir_all}, io::AsyncWriteExt, net::TcpListener, task::JoinHandle};
 use tokio_stream::StreamExt;
 use tokio_util::codec::{Decoder, LinesCodec};
 
@@ -83,18 +83,20 @@ pub fn start_frame_server(l_rx: Receiver<Frame>, r_rx: Receiver<Frame>) -> JoinH
                                 let timestamp: chrono::DateTime<chrono::Local> =
                                     SystemTime::now().into();
 
-                                let file_path = format!(
+                                let file_path_str = format!(
                                     "./images/{}.json",
                                     timestamp.format("%Y-%m-%d_%H-%M-%S%.3f")
                                 );
+                                let file_path = std::path::Path::new(&file_path_str);
 
+                                create_dir_all(file_path.parent().unwrap()).await.unwrap();
+                                
                                 let mut file = fs::OpenOptions::new()
                                     .create_new(true)
                                     .write(true)
                                     .open(file_path)
                                     .await
                                     .unwrap();
-
                                 file.write_all(bytes.as_bytes()).await.unwrap();
 
                                 for (i, frame) in frames.iter().enumerate() {
