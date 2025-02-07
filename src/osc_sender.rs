@@ -1,6 +1,7 @@
 use std::time::SystemTime;
 
 use async_broadcast::Receiver;
+use const_format::concatcp;
 use rosc::{encoder, OscBundle, OscMessage, OscPacket, OscType};
 use tokio::net::UdpSocket;
 use tokio_stream::StreamExt;
@@ -51,6 +52,8 @@ pub fn start_osc_sender(
             }
 
             if VRCFT_V2 {
+                const VRCFT_OSC_PREFIX: &str = "/avatar/parameters/FT/v2/";
+
                 let l_yaw_norm = l.yaw.to_radians().sin();
                 let l_pitch_norm = l.pitch.to_radians().sin();
                 let r_yaw_norm = r.yaw.to_radians().sin();
@@ -62,31 +65,31 @@ pub fn start_osc_sender(
                         timetag: SystemTime::now().try_into().unwrap(),
                         content: vec![
                             OscPacket::Message(OscMessage {
-                                addr: "/avatar/parameters/FT/v2/EyeY".to_string(),
+                                addr: concatcp!(VRCFT_OSC_PREFIX, "EyeY").to_string(),
                                 args: vec![OscType::Float(-pitch_norm)],
                             }),
                             OscPacket::Message(OscMessage {
-                                addr: "/avatar/parameters/FT/v2/EyeLeftX".to_string(),
+                                addr: concatcp!(VRCFT_OSC_PREFIX, "EyeLeftX").to_string(),
                                 args: vec![OscType::Float(l_yaw_norm)],
                             }),
                             OscPacket::Message(OscMessage {
-                                addr: "/avatar/parameters/FT/v2/EyeLeftY".to_string(),
+                                addr: concatcp!(VRCFT_OSC_PREFIX, "EyeLeftY").to_string(),
                                 args: vec![OscType::Float(-l_pitch_norm)],
                             }),
                             OscPacket::Message(OscMessage {
-                                addr: "/avatar/parameters/FT/v2/EyeLidLeft".to_string(),
+                                addr: concatcp!(VRCFT_OSC_PREFIX, "EyeLidLeft").to_string(),
                                 args: vec![OscType::Float(l.openness * 0.75)],
                             }),
                             OscPacket::Message(OscMessage {
-                                addr: "/avatar/parameters/FT/v2/EyeRightX".to_string(),
+                                addr: concatcp!(VRCFT_OSC_PREFIX, "EyeRightX").to_string(),
                                 args: vec![OscType::Float(r_yaw_norm)],
                             }),
                             OscPacket::Message(OscMessage {
-                                addr: "/avatar/parameters/FT/v2/EyeRightY".to_string(),
+                                addr: concatcp!(VRCFT_OSC_PREFIX, "EyeRightY").to_string(),
                                 args: vec![OscType::Float(-r_pitch_norm)],
                             }),
                             OscPacket::Message(OscMessage {
-                                addr: "/avatar/parameters/FT/v2/EyeLidRight".to_string(),
+                                addr: concatcp!(VRCFT_OSC_PREFIX, "EyeLidRight").to_string(),
                                 args: vec![OscType::Float(r.openness * 0.75)],
                             }),
                         ],

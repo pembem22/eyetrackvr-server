@@ -9,6 +9,7 @@ edition = "2021"
 async-broadcast = "0.7.0"
 chrono = "0.4.33"
 clap = { version = "4.5.4", features = ["derive"] }
+const_format = "0.2.34"
 env_logger = "0.11.1"
 futures = "0.3.30"
 hex-literal = "0.4.1"
