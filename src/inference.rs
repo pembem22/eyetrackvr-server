@@ -12,7 +12,7 @@ use crate::{Eye, Frame};
 pub struct EyeState {
     pub pitch: f32,
     pub yaw: f32,
-    pub openness: f32,
+    pub eyelid: f32,
     pub timestamp: SystemTime,
 }
 
@@ -21,7 +21,7 @@ impl Default for EyeState {
         Self {
             pitch: Default::default(),
             yaw: Default::default(),
-            openness: Default::default(),
+            eyelid: Default::default(),
             timestamp: SystemTime::UNIX_EPOCH,
         }
     }
@@ -95,7 +95,7 @@ pub fn eye_inference(
                 tx.broadcast_direct(EyeState {
                     pitch: output[0],
                     yaw: output[1] * if eye == Eye::R { -1.0 } else { 1.0 },
-                    openness: output[2],
+                    eyelid: output[2],
                     timestamp: frame.timestamp,
                 })
                 .await

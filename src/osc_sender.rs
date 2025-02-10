@@ -42,7 +42,7 @@ pub fn start_osc_sender(
                     sock.send(
                         &encoder::encode(&OscPacket::Message(OscMessage {
                             addr: "/tracking/eye/EyesClosedAmount".to_string(),
-                            args: vec![OscType::Float(1.0 - (l.openness + r.openness) / 2.0)],
+                            args: vec![OscType::Float(1.0 - (l.eyelid + r.eyelid) / 2.0)],
                         }))
                         .unwrap(),
                     )
@@ -78,7 +78,7 @@ pub fn start_osc_sender(
                             }),
                             OscPacket::Message(OscMessage {
                                 addr: concatcp!(VRCFT_OSC_PREFIX, "EyeLidLeft").to_string(),
-                                args: vec![OscType::Float(l.openness * 0.75)],
+                                args: vec![OscType::Float(l.eyelid * 0.75)],
                             }),
                             OscPacket::Message(OscMessage {
                                 addr: concatcp!(VRCFT_OSC_PREFIX, "EyeRightX").to_string(),
@@ -90,7 +90,7 @@ pub fn start_osc_sender(
                             }),
                             OscPacket::Message(OscMessage {
                                 addr: concatcp!(VRCFT_OSC_PREFIX, "EyeLidRight").to_string(),
-                                args: vec![OscType::Float(r.openness * 0.75)],
+                                args: vec![OscType::Float(r.eyelid * 0.75)],
                             }),
                         ],
                     }))

@@ -18,7 +18,7 @@ pub fn filter_eye(mut rx: Receiver<EyeState>, tx: Sender<EyeState>) -> JoinHandl
 
         const EL_BETA: f32 = 1.0;
         const EL_FCMIN: f32 = 3.0;
-        let mut filter_openness = OneEuroFilter::new(0.0, EL_FCMIN, EL_FCMIN, EL_BETA);
+        let mut filter_eyelid = OneEuroFilter::new(0.0, EL_FCMIN, EL_FCMIN, EL_BETA);
 
         let last_timestamp = SystemTime::now();
 
@@ -31,12 +31,12 @@ pub fn filter_eye(mut rx: Receiver<EyeState>, tx: Sender<EyeState>) -> JoinHandl
 
             let pitch = filter_pitch.filter_with_delta(eye.pitch, filter_secs);
             let yaw = filter_yaw.filter_with_delta(eye.yaw, filter_secs);
-            let openness = filter_openness.filter_with_delta(eye.openness, filter_secs);
+            let eyelid = filter_eyelid.filter_with_delta(eye.eyelid, filter_secs);
 
             tx.broadcast_direct(EyeState {
                 pitch,
                 yaw,
-                openness,
+                eyelid,
                 timestamp: eye.timestamp,
             })
             .await;
