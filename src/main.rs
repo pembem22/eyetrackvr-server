@@ -15,7 +15,7 @@ use ui::start_ui;
 
 mod app;
 mod camera;
-mod camera_server;
+// mod camera_server;
 #[cfg(feature = "gui")]
 mod camera_texture;
 mod data_processing;
