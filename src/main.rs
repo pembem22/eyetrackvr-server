@@ -1,12 +1,15 @@
 use async_broadcast::broadcast;
-use camera_server::start_camera_server;
+// use camera_server::start_camera_server;
 use clap::Parser;
+use data_processing::{filter_eye, merge_eyes};
 use frame_server::start_frame_server;
 use futures::future::try_join_all;
+use inference::eye_inference;
 #[cfg(feature = "inference")]
-use inference::{start_inference, EyeState};
+use inference::EyeState;
 #[cfg(feature = "inference")]
 use osc_sender::start_osc_sender;
+use tokio::task::JoinHandle;
 #[cfg(feature = "gui")]
 use ui::start_ui;
 
@@ -15,6 +18,7 @@ mod camera;
 mod camera_server;
 #[cfg(feature = "gui")]
 mod camera_texture;
+mod data_processing;
 mod frame_server;
 #[cfg(feature = "inference")]
 mod inference;
@@ -35,7 +39,7 @@ struct Args {
     /// Right camera URL
     #[arg(short = 'r', default_value = "http://openiristracker_r.local/")]
     r_camera_url: String,
-    
+
     /// Face camera URL
     #[arg(short = 'f', default_value = "http://openiristracker_face.local/")]
     f_camera_url: String,
@@ -65,6 +69,16 @@ struct Args {
 async fn main() -> tokio_serial::Result<()> {
     let args = Args::parse();
 
+    let tasks = configure_tasks(&args)?;
+
+    let _ = try_join_all(tasks).await.unwrap();
+
+    Ok(())
+}
+
+fn configure_tasks(args: &Args) -> tokio_serial::Result<Vec<JoinHandle<()>>> {
+    let mut tasks = Vec::new();
+
     let (l_cam_tx, mut l_cam_rx) = broadcast::<Frame>(1);
     let (r_cam_tx, mut r_cam_rx) = broadcast::<Frame>(1);
     let (f_cam_tx, mut f_cam_rx) = broadcast::<Frame>(1);
@@ -75,15 +89,77 @@ async fn main() -> tokio_serial::Result<()> {
 
     let mut app = App::new(l_cam_tx, r_cam_tx, f_cam_tx);
 
-    let mut tasks = Vec::new();
+    // Connect to cameras
 
-    let (l_camera, r_camera, f_camera) = app.start_cameras(args.l_camera_url, args.r_camera_url, args.f_camera_url)?;
-    let server = start_frame_server(l_cam_rx.clone(), r_cam_rx.clone());
-
+    let (l_camera, r_camera, f_camera) = app.start_cameras(
+        args.l_camera_url.clone(),
+        args.r_camera_url.clone(),
+        args.f_camera_url.clone(),
+    )?;
     tasks.push(l_camera);
     tasks.push(r_camera);
     tasks.push(f_camera);
+
+    // Save dataset
+
+    let server = start_frame_server(l_cam_rx.clone(), r_cam_rx.clone());
+
     tasks.push(server);
+
+    // Inference
+
+    let (l_raw_eye_tx, l_raw_eye_rx) = broadcast::<EyeState>(1);
+    let (r_raw_eye_tx, r_raw_eye_rx) = broadcast::<EyeState>(1);
+
+    if args.inference {
+        #[cfg(feature = "inference")]
+        {
+            tasks.push(eye_inference(
+                l_cam_rx.clone(),
+                &args.model_path,
+                args.threads_per_eye,
+                l_raw_eye_tx,
+                Eye::L,
+            ));
+            tasks.push(eye_inference(
+                r_cam_rx.clone(),
+                &args.model_path,
+                args.threads_per_eye,
+                r_raw_eye_tx,
+                Eye::R,
+            ));
+        }
+
+        #[cfg(not(feature = "inference"))]
+        println!("Compiled without inference support, ignoring")
+    }
+
+    // Filter
+
+    let (l_filtered_eye_tx, l_filtered_eye_rx) = broadcast::<EyeState>(1);
+    let (r_filtered_eye_tx, r_filtered_eye_rx) = broadcast::<EyeState>(1);
+
+    tasks.push(filter_eye(l_raw_eye_rx, l_filtered_eye_tx));
+    tasks.push(filter_eye(r_raw_eye_rx, r_filtered_eye_tx));
+
+    // Merge
+
+    let (filtered_eyes_tx, filtered_eyes_rx) = broadcast::<(EyeState, EyeState)>(1);
+
+    tasks.push(merge_eyes(
+        l_filtered_eye_rx,
+        r_filtered_eye_rx,
+        filtered_eyes_tx,
+    ));
+
+    // OSC sender
+
+    tasks.push(start_osc_sender(
+        filtered_eyes_rx,
+        args.osc_out_address.clone(),
+    ));
+
+    // GUI
 
     if !args.headless {
         #[cfg(feature = "gui")]
@@ -96,38 +172,9 @@ async fn main() -> tokio_serial::Result<()> {
         println!("Compiled without GUI support, starting headless anyway")
     }
 
-    if args.inference {
-        #[cfg(feature = "inference")]
-        {
-            let (raw_eyes_tx, raw_eyes_rx) = broadcast::<(EyeState, EyeState)>(1);
+    // HTTP server to mirror cameras
+    // let camera_server = start_camera_server(l_cam_rx.clone(), f_cam_rx.clone());
+    // tasks.push(camera_server);
 
-            let inference = start_inference(
-                l_cam_rx.clone(),
-                r_cam_rx.clone(),
-                raw_eyes_tx.clone(),
-                args.model_path,
-                args.threads_per_eye,
-            );
-            tasks.push(inference);
-
-            let osc_sender = start_osc_sender(raw_eyes_rx.clone(), args.osc_out_address);
-            tasks.push(osc_sender);
-
-            drop(raw_eyes_rx);
-        }
-
-        #[cfg(not(feature = "inference"))]
-        println!("Compiled without inference support, ignoring")
-    }
-
-    let camera_server = start_camera_server(l_cam_rx.clone(), f_cam_rx.clone());
-    tasks.push(camera_server);
-
-    drop(l_cam_rx);
-    drop(r_cam_rx);
-    drop(f_cam_rx);
-
-    let _ = try_join_all(tasks).await.unwrap();
-
-    Ok(())
+    Ok(tasks)
 }
