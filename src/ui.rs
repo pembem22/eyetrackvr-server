@@ -394,7 +394,46 @@ pub fn start_ui(
 
                 // Generic eye state drawer
 
-                let draw_eye_state = |state: EyeState| {
+                let draw_eyelid_state = |state: EyeState| {
+                    const WIDGET_W: f32 = 10.0;
+                    const WIDGET_H: f32 = 150.0;
+
+                    const COLOR_NORMAL: ImColor32 = ImColor32::from_rgb(0, 148, 255);
+                    const COLOR_WIDE: ImColor32 = ImColor32::from_rgb(127, 201, 255);
+
+                    const SPLIT_POINT: f32 = 0.75;
+
+                    let progress = state.eyelid;
+
+                    let draw_list = ui.get_window_draw_list();
+                    let position = ui.cursor_screen_pos();
+                    
+                    let zero_y = position[1] + WIDGET_H;
+                    let split_y = position[1] + WIDGET_H * (1.0 - progress.min(SPLIT_POINT));
+                    let one_y = position[1] + WIDGET_H * (1.0 - progress);
+
+                    draw_list
+                        .add_rect(
+                            [position[0], zero_y],
+                            [position[0] + WIDGET_W, split_y],
+                            COLOR_NORMAL,
+                        )
+                        .filled(true)
+                        .build();
+                    draw_list
+                        .add_rect(
+                            [position[0], split_y],
+                            [position[0] + WIDGET_W, one_y],
+                            COLOR_WIDE,
+                        )
+                        .filled(true)
+                        .build();
+
+                    // Advance cursor to avoid overlapping with next UI element
+                    ui.dummy([WIDGET_W, WIDGET_H]);
+                };
+
+                let draw_gaze_state = |state: EyeState| {
                     const WIDGET_SIZE: f32 = 150.0;
                     const FOV_SIZE: f32 = 0.95;
                     const FOV_RANGE: f32 = 90.0;
@@ -476,18 +515,26 @@ pub fn start_ui(
 
                 ui.text(format!("Raw Eye State"));
                 let group = ui.begin_group();
-                draw_eye_state(l_raw_eye);
+                draw_eyelid_state(l_raw_eye);
                 ui.same_line();
-                draw_eye_state(r_raw_eye);
+                draw_gaze_state(l_raw_eye);
+                ui.same_line();
+                draw_gaze_state(r_raw_eye);
+                ui.same_line();
+                draw_eyelid_state(r_raw_eye);
                 group.end();
 
                 // Filtered Eye State
 
                 ui.text(format!("Filtered Eye State"));
                 let group = ui.begin_group();
-                draw_eye_state(filtered_eyes.0);
+                draw_eyelid_state(filtered_eyes.0);
                 ui.same_line();
-                draw_eye_state(filtered_eyes.1);
+                draw_gaze_state(filtered_eyes.0);
+                ui.same_line();
+                draw_gaze_state(filtered_eyes.1);
+                ui.same_line();
+                draw_eyelid_state(filtered_eyes.1);
                 group.end();
             });
         });

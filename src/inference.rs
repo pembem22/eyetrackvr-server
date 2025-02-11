@@ -19,9 +19,9 @@ pub struct EyeState {
 impl Default for EyeState {
     fn default() -> Self {
         Self {
-            pitch: Default::default(),
-            yaw: Default::default(),
-            eyelid: Default::default(),
+            pitch: 0.0,
+            yaw: 0.0,
+            eyelid: 1.0,
             timestamp: SystemTime::UNIX_EPOCH,
         }
     }
