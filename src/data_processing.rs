@@ -39,7 +39,8 @@ pub fn filter_eye(mut rx: Receiver<EyeState>, tx: Sender<EyeState>) -> JoinHandl
                 eyelid,
                 timestamp: eye.timestamp,
             })
-            .await;
+            .await
+            .unwrap();
         }
     })
 }

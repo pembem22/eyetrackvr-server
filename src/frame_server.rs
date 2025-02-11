@@ -3,7 +3,12 @@ use std::time::SystemTime;
 use async_broadcast::Receiver;
 use futures::{future::join_all, SinkExt};
 use serde_json::Value;
-use tokio::{fs::{self, create_dir_all}, io::AsyncWriteExt, net::TcpListener, task::JoinHandle};
+use tokio::{
+    fs::{self, create_dir_all},
+    io::AsyncWriteExt,
+    net::TcpListener,
+    task::JoinHandle,
+};
 use tokio_stream::StreamExt;
 use tokio_util::codec::{Decoder, LinesCodec};
 
@@ -90,7 +95,7 @@ pub fn start_frame_server(l_rx: Receiver<Frame>, r_rx: Receiver<Frame>) -> JoinH
                                 let file_path = std::path::Path::new(&file_path_str);
 
                                 create_dir_all(file_path.parent().unwrap()).await.unwrap();
-                                
+
                                 let mut file = fs::OpenOptions::new()
                                     .create_new(true)
                                     .write(true)

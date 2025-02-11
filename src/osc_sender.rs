@@ -95,7 +95,9 @@ pub fn start_osc_sender(
                         ],
                     }))
                     .unwrap(),
-                ).await.unwrap();
+                )
+                .await
+                .unwrap();
             }
         }
     })

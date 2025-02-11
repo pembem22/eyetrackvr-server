@@ -16,7 +16,11 @@ impl App {
         let r_camera = Camera::new(Eye::R, r_sender);
         let f_camera = Camera::new(Eye::R, f_sender);
 
-        App { l_camera, r_camera, f_camera }
+        App {
+            l_camera,
+            r_camera,
+            f_camera,
+        }
     }
 
     pub fn start_cameras(

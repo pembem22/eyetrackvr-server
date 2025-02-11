@@ -407,7 +407,7 @@ pub fn start_ui(
 
                     let draw_list = ui.get_window_draw_list();
                     let position = ui.cursor_screen_pos();
-                    
+
                     let zero_y = position[1] + WIDGET_H;
                     let split_y = position[1] + WIDGET_H * (1.0 - progress.min(SPLIT_POINT));
                     let one_y = position[1] + WIDGET_H * (1.0 - progress);
