@@ -2,6 +2,7 @@ use std::time::{Duration, SystemTime};
 
 use async_broadcast::Receiver;
 use image::DynamicImage;
+use imgui::TextureId;
 use imgui_wgpu::{Texture, TextureConfig};
 
 use crate::{ui, Frame, CAMERA_FRAME_SIZE};
@@ -75,6 +76,10 @@ impl CameraTexture {
         .uv0([1.0, 0.0])
         .uv1([0.0, 1.0])
         .build(ui);
+    }
+
+    pub fn get_texture_id(self) -> TextureId {
+        self.texture_id
     }
 
     pub fn get_fps(self) -> f32 {

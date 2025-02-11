@@ -1,9 +1,13 @@
+use crate::camera::CAMERA_FRAME_SIZE;
+use crate::inference::{
+    EyeState, FRAME_CROP_H, FRAME_CROP_W, FRAME_CROP_X, FRAME_CROP_Y, FRAME_RESIZE_H,
+    FRAME_RESIZE_W,
+};
 use crate::{camera_texture::CameraTexture, ui, Frame};
 use async_broadcast::Receiver;
 use imgui::*;
 use imgui_wgpu::{Renderer, RendererConfig};
 use pollster::block_on;
-use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use tokio::task::JoinHandle;
 use winit::{
@@ -304,48 +308,186 @@ pub fn start_ui(
     l_rx: Receiver<Frame>,
     r_rx: Receiver<Frame>,
     f_rx: Receiver<Frame>,
+
+    l_raw_eye_rx: Receiver<EyeState>,
+    r_raw_eye_rx: Receiver<EyeState>,
+    filtered_eyes_rx: Receiver<(EyeState, EyeState)>,
 ) -> JoinHandle<()> {
-    tokio::task::spawn_blocking(|| {
+    tokio::task::spawn_blocking(move || {
         let mut ui = ui::UI::new();
 
         let mut l_texture = CameraTexture::new(&mut ui, Some("L texture"));
         let mut r_texture = CameraTexture::new(&mut ui, Some("R texture"));
         let mut f_texture = CameraTexture::new(&mut ui, Some("F texture"));
 
-        let l_rx = Arc::new(Mutex::new(l_rx));
-        let r_rx = Arc::new(Mutex::new(r_rx));
-        let f_rx = Arc::new(Mutex::new(f_rx));
+        let mut l_rx = l_rx.clone();
+        let mut r_rx = r_rx.clone();
+        let mut f_rx = f_rx.clone();
 
-        ui.run(move |imgui, queue, renderer| {
-            let mut l_rx = l_rx.lock().unwrap();
-            let mut r_rx = r_rx.lock().unwrap();
-            let mut f_rx = f_rx.lock().unwrap();
+        let mut l_raw_eye_rx = l_raw_eye_rx.clone();
+        let mut r_raw_eye_rx = r_raw_eye_rx.clone();
+        let mut filtered_eyes_rx = filtered_eyes_rx.clone();
 
+        let mut l_raw_eye = EyeState::default();
+        let mut r_raw_eye = EyeState::default();
+        let mut filtered_eyes = (EyeState::default(), EyeState::default());
+
+        ui.run(move |ui, queue, renderer| {
             l_texture.update_texture(&mut l_rx, queue, renderer);
             r_texture.update_texture(&mut r_rx, queue, renderer);
             f_texture.update_texture(&mut f_rx, queue, renderer);
 
-            imgui.window("Camera Feeds").build(move || {
-                let group = imgui.begin_group();
-                l_texture.build(imgui);
+            l_raw_eye = l_raw_eye_rx.try_recv().unwrap_or(l_raw_eye);
+            r_raw_eye = r_raw_eye_rx.try_recv().unwrap_or(r_raw_eye);
+
+            filtered_eyes = filtered_eyes_rx.try_recv().unwrap_or(filtered_eyes);
+
+            ui.window("Camera Feeds").build(move || {
+                let group = ui.begin_group();
+                l_texture.build(ui);
                 let l_fps = l_texture.get_fps();
-                imgui.text(format!("Left Eye, fps: {l_fps:03.1}"));
+                ui.text(format!("Left Eye, fps: {l_fps:03.1}"));
                 group.end();
 
-                imgui.same_line();
+                ui.same_line();
 
-                let group = imgui.begin_group();
-                r_texture.build(imgui);
+                let group = ui.begin_group();
+                r_texture.build(ui);
                 let r_fps = r_texture.get_fps();
-                imgui.text(format!("Right Eye, fps: {r_fps:03.1}"));
+                ui.text(format!("Right Eye, fps: {r_fps:03.1}"));
                 group.end();
 
-                imgui.same_line();
+                ui.same_line();
 
-                let group = imgui.begin_group();
-                f_texture.build(imgui);
+                let group = ui.begin_group();
+                f_texture.build(ui);
                 let f_fps = f_texture.get_fps();
-                imgui.text(format!("Face, fps: {f_fps:03.1}"));
+                ui.text(format!("Face, fps: {f_fps:03.1}"));
+                group.end();
+            });
+
+            ui.window("Inference").build(move || {
+                // Cropped Camera Feeds
+
+                let draw_cropped_feed = |camera_texture: CameraTexture| {
+                    imgui::Image::new(
+                        camera_texture.get_texture_id(),
+                        [FRAME_RESIZE_W as f32, FRAME_RESIZE_H as f32],
+                    )
+                    .uv0([
+                        1.0 - FRAME_CROP_X as f32 / CAMERA_FRAME_SIZE as f32,
+                        FRAME_CROP_Y as f32 / CAMERA_FRAME_SIZE as f32,
+                    ])
+                    .uv1([
+                        1.0 - (FRAME_CROP_X + FRAME_CROP_W) as f32 / CAMERA_FRAME_SIZE as f32,
+                        (FRAME_CROP_Y + FRAME_CROP_H) as f32 / CAMERA_FRAME_SIZE as f32,
+                    ])
+                    .build(ui);
+                };
+
+                ui.text(format!("Cropped Camera Feeds"));
+                let group = ui.begin_group();
+                draw_cropped_feed(l_texture);
+                ui.same_line();
+                draw_cropped_feed(r_texture);
+                group.end();
+
+                // Generic eye state drawer
+
+                let draw_eye_state = |state: EyeState| {
+                    const WIDGET_SIZE: f32 = 150.0;
+                    const FOV_SIZE: f32 = 0.95;
+                    const FOV_RANGE: f32 = 90.0;
+                    const FOV_RANGE_DIV_2: f32 = FOV_RANGE / 2.0;
+
+                    const GAZE_RADIUS: f32 = 5.0;
+
+                    const COLOR_BACKGROUND: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
+                    const COLOR_AXES: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
+                    const COLOR_CIRCLES: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
+                    const COLOR_GAZE: [f32; 4] = [0.0, 0.1, 0.4, 1.0];
+
+                    let position = ui.cursor_screen_pos();
+                    let size = WIDGET_SIZE;
+
+                    let draw_list = ui.get_window_draw_list();
+
+                    // Define the center of the drawing area
+                    let center = [position[0] + size * 0.5, position[1] + size * 0.5];
+
+                    // Define square corners
+                    let top_left = [center[0] - size * 0.5, center[1] - size * 0.5];
+                    let bottom_right = [center[0] + size * 0.5, center[1] + size * 0.5];
+
+                    // Draw white square
+                    draw_list
+                        .add_rect(top_left, bottom_right, COLOR_BACKGROUND)
+                        .filled(true)
+                        .build();
+
+                    // Draw axes
+                    draw_list
+                        .add_line(
+                            [center[0], top_left[1]],
+                            [center[0], bottom_right[1]],
+                            COLOR_AXES,
+                        )
+                        .build(); // Vertical axis
+                    draw_list
+                        .add_line(
+                            [top_left[0], center[1]],
+                            [bottom_right[0], center[1]],
+                            COLOR_AXES,
+                        )
+                        .build(); // Horizontal axis
+
+                    let max_radius = size * FOV_SIZE / 2.0;
+                    draw_list
+                        .add_circle(center, max_radius, COLOR_CIRCLES)
+                        .build();
+
+                    for i in (15..FOV_RANGE_DIV_2 as i32).step_by(15) {
+                        draw_list
+                            .add_circle(
+                                center,
+                                i as f32 / FOV_RANGE_DIV_2 * max_radius,
+                                COLOR_CIRCLES,
+                            )
+                            .build();
+                    }
+
+                    draw_list
+                        .add_circle(
+                            [
+                                center[0] + state.yaw / FOV_RANGE_DIV_2 * max_radius,
+                                center[1] + state.pitch / FOV_RANGE_DIV_2 * max_radius,
+                            ],
+                            GAZE_RADIUS,
+                            COLOR_GAZE,
+                        )
+                        .filled(true)
+                        .build();
+
+                    // Advance cursor to avoid overlapping with next UI element
+                    ui.dummy([size, size]);
+                };
+
+                // Raw Eye State
+
+                ui.text(format!("Raw Eye State"));
+                let group = ui.begin_group();
+                draw_eye_state(l_raw_eye);
+                ui.same_line();
+                draw_eye_state(r_raw_eye);
+                group.end();
+
+                // Filtered Eye State
+
+                ui.text(format!("Filtered Eye State"));
+                let group = ui.begin_group();
+                draw_eye_state(filtered_eyes.0);
+                ui.same_line();
+                draw_eye_state(filtered_eyes.1);
                 group.end();
             });
         });

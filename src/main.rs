@@ -108,8 +108,10 @@ fn configure_tasks(args: &Args) -> tokio_serial::Result<Vec<JoinHandle<()>>> {
 
     // Inference
 
-    let (l_raw_eye_tx, l_raw_eye_rx) = broadcast::<EyeState>(1);
-    let (r_raw_eye_tx, r_raw_eye_rx) = broadcast::<EyeState>(1);
+    let (l_raw_eye_tx, mut l_raw_eye_rx) = broadcast::<EyeState>(1);
+    let (r_raw_eye_tx, mut r_raw_eye_rx) = broadcast::<EyeState>(1);
+    l_raw_eye_rx.set_overflow(true);
+    r_raw_eye_rx.set_overflow(true);
 
     if args.inference {
         #[cfg(feature = "inference")]
@@ -136,26 +138,29 @@ fn configure_tasks(args: &Args) -> tokio_serial::Result<Vec<JoinHandle<()>>> {
 
     // Filter
 
-    let (l_filtered_eye_tx, l_filtered_eye_rx) = broadcast::<EyeState>(1);
-    let (r_filtered_eye_tx, r_filtered_eye_rx) = broadcast::<EyeState>(1);
+    let (l_filtered_eye_tx, mut l_filtered_eye_rx) = broadcast::<EyeState>(1);
+    let (r_filtered_eye_tx, mut r_filtered_eye_rx) = broadcast::<EyeState>(1);
+    l_filtered_eye_rx.set_overflow(true);
+    r_filtered_eye_rx.set_overflow(true);
 
-    tasks.push(filter_eye(l_raw_eye_rx, l_filtered_eye_tx));
-    tasks.push(filter_eye(r_raw_eye_rx, r_filtered_eye_tx));
+    tasks.push(filter_eye(l_raw_eye_rx.clone(), l_filtered_eye_tx));
+    tasks.push(filter_eye(r_raw_eye_rx.clone(), r_filtered_eye_tx));
 
     // Merge
 
-    let (filtered_eyes_tx, filtered_eyes_rx) = broadcast::<(EyeState, EyeState)>(1);
+    let (filtered_eyes_tx, mut filtered_eyes_rx) = broadcast::<(EyeState, EyeState)>(1);
+    filtered_eyes_rx.set_overflow(true);
 
     tasks.push(merge_eyes(
-        l_filtered_eye_rx,
-        r_filtered_eye_rx,
+        l_filtered_eye_rx.clone(),
+        r_filtered_eye_rx.clone(),
         filtered_eyes_tx,
     ));
 
     // OSC sender
 
     tasks.push(start_osc_sender(
-        filtered_eyes_rx,
+        filtered_eyes_rx.clone(),
         args.osc_out_address.clone(),
     ));
 
@@ -164,7 +169,14 @@ fn configure_tasks(args: &Args) -> tokio_serial::Result<Vec<JoinHandle<()>>> {
     if !args.headless {
         #[cfg(feature = "gui")]
         {
-            let ui = start_ui(l_cam_rx.clone(), r_cam_rx.clone(), f_cam_rx.clone());
+            let ui = start_ui(
+                l_cam_rx.clone(),
+                r_cam_rx.clone(),
+                f_cam_rx.clone(),
+                l_raw_eye_rx.clone(),
+                r_raw_eye_rx.clone(),
+                filtered_eyes_rx.clone(),
+            );
             tasks.push(ui);
         }
 

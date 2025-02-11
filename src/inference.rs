@@ -27,6 +27,13 @@ impl Default for EyeState {
     }
 }
 
+pub const FRAME_CROP_X: u32 = 30;
+pub const FRAME_CROP_Y: u32 = 30;
+pub const FRAME_CROP_W: u32 = 180;
+pub const FRAME_CROP_H: u32 = 180;
+pub const FRAME_RESIZE_W: u32 = 64;
+pub const FRAME_RESIZE_H: u32 = 64;
+
 pub fn eye_inference(
     mut rx: Receiver<Frame>,
     model_path: &str,
@@ -54,7 +61,9 @@ pub fn eye_inference(
                     Ok(frame) => Some(frame),
                     Err(e) => {
                         match e {
-                            RecvError::Overflowed(skipped) => println!("Skipped {skipped} frames"),
+                            RecvError::Overflowed(skipped) => {
+                                println!("Skipped {skipped} frames")
+                            }
                             RecvError::Closed => println!("Channel closed"),
                         };
                         None
@@ -73,18 +82,21 @@ pub fn eye_inference(
                 raw_frame = raw_frame.fliph();
             }
 
-            let cropped_frame = raw_frame.view(30, 30, 180, 180);
+            let cropped_frame =
+                raw_frame.view(FRAME_CROP_X, FRAME_CROP_Y, FRAME_CROP_W, FRAME_CROP_H);
 
             let final_frame = image::imageops::resize(
                 &cropped_frame.to_image(),
-                64,
-                64,
+                FRAME_RESIZE_W,
+                FRAME_RESIZE_H,
                 image::imageops::FilterType::Lanczos3,
             );
 
             let array = ndarray::Array::from_iter(final_frame.pixels().map(|p| p[0] as f32));
 
-            let array = array.to_shape((1, 64, 64, 1)).unwrap();
+            let array = array
+                .to_shape((1, FRAME_RESIZE_W as usize, FRAME_RESIZE_H as usize, 1))
+                .unwrap();
 
             let outputs = model.run(ort::inputs![&array].unwrap()).unwrap();
             let output = outputs.iter().next().unwrap().1;

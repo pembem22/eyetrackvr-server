@@ -68,7 +68,9 @@ pub fn merge_eyes(
 
             // l_eye_state = r_eye_state;
 
-            tx.broadcast_direct((l_eye_state, r_eye_state)).await;
+            tx.broadcast_direct((l_eye_state, r_eye_state))
+                .await
+                .unwrap();
         }
     })
 }
