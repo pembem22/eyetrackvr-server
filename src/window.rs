@@ -4,11 +4,7 @@ use imgui_winit_support::WinitPlatform;
 use pollster::block_on;
 use std::{sync::Arc, time::Instant};
 use winit::{
-    application::ApplicationHandler,
-    dpi::LogicalSize,
-    event::{Event, WindowEvent},
-    event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
-    window::Window,
+    application::ApplicationHandler, dpi::LogicalSize, event::{Event, WindowEvent}, event_loop::{ActiveEventLoop, ControlFlow, EventLoop}, platform::windows::EventLoopBuilderExtWindows, window::Window
 };
 
 use crate::ui::{AppRenderer, AppRendererContext};
@@ -343,23 +339,12 @@ impl ApplicationHandler for AppWindow {
     }
 }
 
-pub fn start_ui(renderer_context: AppRendererContext) {
-    // let event_loop = EventLoop::new().unwrap();
-
-    // // ControlFlow::Poll continuously runs the event loop, even if the OS hasn't
-    // // dispatched any events. This is ideal for games and similar applications.
-    // event_loop.set_control_flow(winit::event_loop::ControlFlow::Poll);
-
-    // let proxy = event_loop.create_proxy();
-
-    // let mut app_window = AppWindow::new(gui_receivers);
-    // // tokio::task::spawn_blocking(|| {});
-    // event_loop.run_app(&mut app_window).unwrap();
-
-    // TODO: This is blocking! Run on main thread and start an async runtime on another one?
-    let event_loop = EventLoop::new().unwrap();
-    event_loop.set_control_flow(ControlFlow::Poll);
-    event_loop
-        .run_app(&mut AppWindow::new(renderer_context))
-        .unwrap();
+pub fn start_ui(renderer_context: AppRendererContext) -> tokio::task::JoinHandle<()>{
+    tokio::task::spawn_blocking(|| {
+        let event_loop = EventLoop::builder().with_any_thread(true).build().unwrap();
+        event_loop.set_control_flow(ControlFlow::Poll);
+        event_loop
+            .run_app(&mut AppWindow::new(renderer_context))
+            .unwrap();
+    })
 }

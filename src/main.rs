@@ -171,18 +171,14 @@ fn configure_tasks(args: &Args) -> tokio_serial::Result<Vec<JoinHandle<()>>> {
     if !args.headless {
         #[cfg(feature = "gui")]
         {
-            use crate::ui::AppRendererContext;
-
-            // FIXME: rn blocks the thread here.
-            start_ui(AppRendererContext {
+            tasks.push(start_ui(crate::ui::AppRendererContext {
                 l_rx: l_cam_rx.clone(),
                 r_rx: r_cam_rx.clone(),
                 f_rx: f_cam_rx.clone(),
                 l_raw_rx: l_raw_eye_rx.clone(),
                 r_raw_rx: r_raw_eye_rx.clone(),
                 filtered_eyes_rx: filtered_eyes_rx.clone(),
-            });
-            // tasks.push(ui);
+            }));
         }
 
         #[cfg(not(feature = "inference"))]
