@@ -1,7 +1,7 @@
 [package]
 name = "eyetrackvr-server"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -12,32 +12,43 @@ clap = { version = "4.5.4", features = ["derive"] }
 const_format = "0.2.34"
 env_logger = "0.11.1"
 futures = "0.3.30"
-hex-literal = "0.4.1"
-hyper = { version = "=0.14.28", features = ["client", "server", "http1", "stream", "tcp"] }
-image = "0.24.8"
-imgui = { version = "0.11.0", optional = true }
-imgui-wgpu = { version = "0.24.0", optional = true }
-imgui-winit-support = { version = "0.11.0", optional = true }
+hex-literal = "1.0.0"
+hyper = { version = "=0.14.32", features = ["client", "server", "http1", "stream", "tcp"] }
+image = "0.25.6"
+imgui = { version = "0.12.0", optional = true }
+imgui-wgpu = { version = "0.25.0", optional = true }
+imgui-winit-support = { version = "0.13.0", optional = true }
 mime = "0.3.17"
 multipart-stream = "0.1.2"
 ndarray = "0.16.1"
 nokhwa = { version = "0.10.7", default-features = false, features = ["input-native"]}
 one-euro-rs = { git = "https://github.com/pembem22/one-euro-rs.git", branch = "develop" }
-ort = { version = "=2.0.0-rc.9", optional = true }
-pollster = "0.3.0"
-rosc = "0.10.1"
+ort = { version = "=2.0.0-rc.10", optional = true }
+ort-sys = { version = "=2.0.0-rc.10", default-features = false, optional = true }
+pollster = "0.4.0"
+rosc = "0.11.4"
 serde_json = "1.0.116"
 tokio = { version = "1.35.1", features = ["full"] }
 tokio-serial = "5.4.4"
 tokio-stream = "0.1.14"
 tokio-util = { version = "0.7.10", features = ["codec"] }
-wgpu = { version = "0.17.2", optional = true }
-winit = { version = "0.27.5", optional = true }
+# Use 25.0.0 instead of 25.0.2 -- the minor version is important for the patch below to work.
+wgpu = { version = "25.0.0", optional = true }
+winit = { version = "0.30.11", optional = true }
 
 [features]
 default = ["inference", "gui"]
-inference = ["dep:ort"]
+inference = ["dep:ort", "dep:ort-sys"]
 gui = ["dep:imgui", "dep:imgui-wgpu", "dep:imgui-winit-support", "dep:wgpu", "dep:winit"]
 
 [patch.crates-io]
 mio-serial = { git = "https://github.com/pembem22/mio-serial.git", branch = "fix-stop-bits" }
+# # Avoid assertion fail in debug mode, required until a newer imgui-rs release.
+# # https://github.com/imgui-rs/imgui-rs/issues/789
+# imgui = { git = "https://github.com/imgui-rs/imgui-rs", rev = "cb8beeb" }
+# imgui-sys = { git = "https://github.com/imgui-rs/imgui-rs", rev = "cb8beeb" }
+# # Same stuff, support for zero-sized buffers is broken and causes a crash, need a new release.
+# # https://github.com/gfx-rs/wgpu/issues/3170
+# wgpu = { git = "https://github.com/gfx-rs/wgpu", rev = "c0a580d" }
+# https://github.com/Yatekii/imgui-wgpu-rs/pull/124
+imgui-wgpu = { git = "https://github.com/Yatekii/imgui-wgpu-rs", rev = "7408a75" }

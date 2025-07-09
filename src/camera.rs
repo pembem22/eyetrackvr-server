@@ -147,7 +147,7 @@ impl Camera {
                             }
                         };
 
-                        let mut decoder = image::io::Reader::new(Cursor::new(buf.clone()));
+                        let mut decoder = image::ImageReader::new(Cursor::new(buf.clone()));
                         decoder.set_format(image::ImageFormat::Jpeg);
 
                         let image = decoder.decode();
@@ -227,7 +227,7 @@ impl Camera {
                     };
                     let buf = p.body;
 
-                    let mut decoder = image::io::Reader::new(Cursor::new(buf.clone()));
+                    let mut decoder = image::ImageReader::new(Cursor::new(buf.clone()));
                     decoder.set_format(image::ImageFormat::Jpeg);
 
                     let image = decoder.decode();
@@ -272,7 +272,7 @@ impl Camera {
             );
 
             while let Ok(frame_raw) = camera.frame_raw() {
-                let mut decoder = image::io::Reader::new(Cursor::new(&frame_raw));
+                let mut decoder = image::ImageReader::new(Cursor::new(&frame_raw));
                 decoder.set_format(image::ImageFormat::Jpeg);
 
                 let image = decoder.decode();

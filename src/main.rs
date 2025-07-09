@@ -4,9 +4,9 @@ use clap::Parser;
 use data_processing::{filter_eye, merge_eyes};
 use frame_server::start_frame_server;
 use futures::future::try_join_all;
-use inference::eye_inference;
 #[cfg(feature = "inference")]
 use inference::EyeState;
+use inference::eye_inference;
 #[cfg(feature = "inference")]
 use osc_sender::start_osc_sender;
 use tokio::task::JoinHandle;
@@ -169,15 +169,17 @@ fn configure_tasks(args: &Args) -> tokio_serial::Result<Vec<JoinHandle<()>>> {
     if !args.headless {
         #[cfg(feature = "gui")]
         {
-            let ui = start_ui(
-                l_cam_rx.clone(),
-                r_cam_rx.clone(),
-                f_cam_rx.clone(),
-                l_raw_eye_rx.clone(),
-                r_raw_eye_rx.clone(),
-                filtered_eyes_rx.clone(),
-            );
-            tasks.push(ui);
+            use crate::ui::AppRendererContext;
+
+            let ui = start_ui(AppRendererContext {
+                l_rx: l_cam_rx.clone(),
+                r_rx: r_cam_rx.clone(),
+                f_rx: f_cam_rx.clone(),
+                l_raw_rx: l_raw_eye_rx.clone(),
+                r_raw_rx: r_raw_eye_rx.clone(),
+                filtered_eyes_rx: filtered_eyes_rx.clone(),
+            });
+            // tasks.push(ui);
         }
 
         #[cfg(not(feature = "inference"))]

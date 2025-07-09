@@ -5,7 +5,7 @@ use image::DynamicImage;
 use imgui::TextureId;
 use imgui_wgpu::{Texture, TextureConfig};
 
-use crate::{ui, Frame, CAMERA_FRAME_SIZE};
+use crate::{CAMERA_FRAME_SIZE, Frame};
 
 #[derive(Clone, Copy)]
 pub struct CameraTexture {
@@ -15,7 +15,11 @@ pub struct CameraTexture {
 }
 
 impl CameraTexture {
-    pub fn new(ui: &mut ui::UI, label: Option<&str>) -> CameraTexture {
+    pub fn new(
+        device: &mut wgpu::Device,
+        renderer: &mut imgui_wgpu::Renderer,
+        label: Option<&str>,
+    ) -> CameraTexture {
         let texture_config: TextureConfig<'_> = TextureConfig {
             size: wgpu::Extent3d {
                 width: CAMERA_FRAME_SIZE,
@@ -27,12 +31,12 @@ impl CameraTexture {
             ..Default::default()
         };
 
-        let texture = Texture::new(&ui.device, &ui.renderer, texture_config);
+        let texture = Texture::new(device, renderer, texture_config);
 
         CameraTexture {
             last_delta: Duration::ZERO,
             last_timestamp: SystemTime::now(),
-            texture_id: ui.renderer.textures.insert(texture),
+            texture_id: renderer.textures.insert(texture),
         }
     }
 

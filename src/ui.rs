@@ -3,63 +3,78 @@ use crate::inference::{
     EyeState, FRAME_CROP_H, FRAME_CROP_W, FRAME_CROP_X, FRAME_CROP_Y, FRAME_RESIZE_H,
     FRAME_RESIZE_W,
 };
-use crate::{camera_texture::CameraTexture, ui, Frame};
+use crate::{Frame, camera_texture::CameraTexture};
 use async_broadcast::Receiver;
+
 use imgui::*;
 use imgui_wgpu::{Renderer, RendererConfig};
+use imgui_winit_support::WinitPlatform;
 use pollster::block_on;
-use std::time::Instant;
-use tokio::task::JoinHandle;
+use std::{sync::Arc, time::Instant};
 use winit::{
+    application::ApplicationHandler,
     dpi::LogicalSize,
-    event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent},
-    event_loop::{ControlFlow, EventLoopBuilder},
-    platform::windows::EventLoopBuilderExtWindows,
+    event::{Event, WindowEvent},
+    event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
     window::Window,
 };
 
-pub(crate) struct UI {
-    event_loop: winit::event_loop::EventLoop<()>,
-    surface: wgpu::Surface,
-    pub device: wgpu::Device,
-    pub queue: wgpu::Queue,
-    window: winit::window::Window,
-    imgui: imgui::Context,
-    platform: imgui_winit_support::WinitPlatform,
-    pub renderer: imgui_wgpu::Renderer,
-
-    pause: bool,
+struct ImguiState {
+    context: imgui::Context,
+    platform: WinitPlatform,
+    renderer: Renderer,
+    clear_color: wgpu::Color,
+    last_frame: Instant,
+    last_cursor: Option<MouseCursor>,
 }
 
-impl UI {
-    pub fn new() -> UI {
-        env_logger::init();
+struct AppWindow {
+    device: wgpu::Device,
+    queue: wgpu::Queue,
+    window: Arc<Window>,
+    surface_desc: wgpu::SurfaceConfiguration,
+    surface: wgpu::Surface<'static>,
+    hidpi_factor: f64,
+    imgui: Option<ImguiState>,
+}
 
-        // Set up window and GPU
-        let event_loop = EventLoopBuilder::new().with_any_thread(true).build();
+struct App {
+    window: Option<AppWindow>,
 
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+    renderer: Option<AppRenderer>,
+    renderer_context: AppRendererContext,
+}
+
+impl App {
+    fn new(renderer_context: AppRendererContext) -> Self {
+        App {
+            window: None,
+
+            renderer: None,
+            renderer_context,
+        }
+    }
+}
+
+impl AppWindow {
+    fn setup_gpu(event_loop: &ActiveEventLoop) -> Self {
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             backends: wgpu::Backends::PRIMARY,
             ..Default::default()
         });
 
-        let (window, size, surface) = {
-            let version = env!("CARGO_PKG_VERSION");
+        let window = {
+            let size = LogicalSize::new(1280.0, 720.0);
 
-            let window = Window::new(&event_loop).unwrap();
-            window.set_inner_size(LogicalSize {
-                width: 1280.0,
-                height: 720.0,
-            });
-            window.set_title(&format!("imgui-wgpu {version}"));
-            let size = window.inner_size();
-
-            let surface = unsafe { instance.create_surface(&window) }.unwrap();
-
-            (window, size, surface)
+            let attributes = Window::default_attributes()
+                .with_inner_size(size)
+                .with_title("eyetrackvr-server".to_string());
+            Arc::new(event_loop.create_window(attributes).unwrap())
         };
 
+        let size = window.inner_size();
         let hidpi_factor = window.scale_factor();
+        let surface = instance.create_surface(window.clone()).unwrap();
 
         let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,
@@ -68,15 +83,8 @@ impl UI {
         }))
         .unwrap();
 
-        let (device, queue) = block_on(adapter.request_device(
-            &wgpu::DeviceDescriptor {
-                label: None,
-                features: wgpu::Features::empty(),
-                limits: wgpu::Limits::default(),
-            },
-            None,
-        ))
-        .unwrap();
+        let (device, queue) =
+            block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).unwrap();
 
         // Set up swap chain
         let surface_desc = wgpu::SurfaceConfiguration {
@@ -85,26 +93,39 @@ impl UI {
             width: size.width,
             height: size.height,
             present_mode: wgpu::PresentMode::Fifo,
+            desired_maximum_frame_latency: 2,
             alpha_mode: wgpu::CompositeAlphaMode::Auto,
             view_formats: vec![wgpu::TextureFormat::Bgra8Unorm],
         };
 
         surface.configure(&device, &surface_desc);
 
-        // Set up dear imgui
-        let mut imgui = imgui::Context::create();
-        let mut platform = imgui_winit_support::WinitPlatform::init(&mut imgui);
+        let imgui = None;
+        Self {
+            device,
+            queue,
+            window,
+            surface_desc,
+            surface,
+            hidpi_factor,
+            imgui,
+        }
+    }
+
+    fn setup_imgui(&mut self) {
+        let mut context = imgui::Context::create();
+        let mut platform = imgui_winit_support::WinitPlatform::new(&mut context);
         platform.attach_window(
-            imgui.io_mut(),
-            &window,
+            context.io_mut(),
+            &self.window,
             imgui_winit_support::HiDpiMode::Default,
         );
-        imgui.set_ini_filename(None);
+        context.set_ini_filename(None);
 
-        let font_size = (13.0 * hidpi_factor) as f32;
-        imgui.io_mut().font_global_scale = (1.0 / hidpi_factor) as f32;
+        let font_size = (13.0 * self.hidpi_factor) as f32;
+        context.io_mut().font_global_scale = (1.0 / self.hidpi_factor) as f32;
 
-        imgui.fonts().add_font(&[FontSource::DefaultFontData {
+        context.fonts().add_font(&[FontSource::DefaultFontData {
             config: Some(imgui::FontConfig {
                 oversample_h: 1,
                 pixel_snap_h: true,
@@ -116,56 +137,6 @@ impl UI {
         //
         // Set up dear imgui wgpu renderer
         //
-        let renderer_config = RendererConfig {
-            texture_format: surface_desc.format,
-            ..Default::default()
-        };
-
-        let renderer = Renderer::new(&mut imgui, &device, &queue, renderer_config);
-
-        // Set up Lenna texture
-        // let lenna_bytes = include_bytes!("../resources/checker.png");
-        // let image =
-        //     image::load_from_memory_with_format(lenna_bytes, ImageFormat::Png).expect("invalid image");
-        // let image = image.to_rgba8();
-        // let (width, height) = image.dimensions();
-        // let raw_data = image.into_raw();
-
-        // let texture_config = TextureConfig {
-        //     size: Extent3d {
-        //         width,
-        //         height,
-        //         ..Default::default()
-        //     },
-        //     label: Some("lenna texture"),
-        //     format: Some(wgpu::TextureFormat::Rgba8Unorm),
-        //     ..Default::default()
-        // };
-
-        // let texture = Texture::new(&device, &renderer, texture_config);
-
-        // texture.write(&queue, &raw_data, width, height);
-        // let lenna_texture_id = renderer.textures.insert(texture);
-
-        // init(&device, &queue, &mut renderer);
-
-        UI {
-            event_loop,
-            surface,
-            device,
-            queue,
-            window,
-            imgui,
-            platform,
-            renderer,
-            pause: false,
-        }
-    }
-
-    pub fn run<F: FnMut(&imgui::Ui, &wgpu::Queue, &mut imgui_wgpu::Renderer) + 'static>(
-        mut self,
-        mut render: F,
-    ) {
         let clear_color = wgpu::Color {
             r: 0.1,
             g: 0.2,
@@ -173,370 +144,483 @@ impl UI {
             a: 1.0,
         };
 
-        let mut last_frame = Instant::now();
-        let mut last_cursor = None;
+        let renderer_config = RendererConfig {
+            texture_format: self.surface_desc.format,
+            ..Default::default()
+        };
 
-        self.event_loop.run(move |event, _, control_flow| {
-            *control_flow = if cfg!(feature = "metal-auto-capture") {
-                ControlFlow::Exit
-            } else {
-                ControlFlow::Poll
-            };
-            match event {
-                Event::WindowEvent {
-                    event: WindowEvent::Resized(size),
-                    ..
-                } => {
-                    if size.width == 0 || size.height == 0 {
-                        self.pause = true;
-                        return;
-                    }
+        let renderer = Renderer::new(&mut context, &self.device, &self.queue, renderer_config);
+        let last_frame = Instant::now();
+        let last_cursor = None;
 
-                    self.pause = false;
+        self.imgui = Some(ImguiState {
+            context,
+            platform,
+            renderer,
+            clear_color,
+            last_frame,
+            last_cursor,
+        })
+    }
 
-                    let surface_desc = wgpu::SurfaceConfiguration {
-                        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-                        format: wgpu::TextureFormat::Bgra8UnormSrgb,
-                        width: size.width,
-                        height: size.height,
-                        present_mode: wgpu::PresentMode::Fifo,
-                        alpha_mode: wgpu::CompositeAlphaMode::Auto,
-                        view_formats: vec![wgpu::TextureFormat::Bgra8Unorm],
-                    };
-
-                    self.surface.configure(&self.device, &surface_desc);
-                }
-                Event::WindowEvent {
-                    event:
-                        WindowEvent::KeyboardInput {
-                            input:
-                                KeyboardInput {
-                                    virtual_keycode: Some(VirtualKeyCode::Escape),
-                                    state: ElementState::Pressed,
-                                    ..
-                                },
-                            ..
-                        },
-                    ..
-                }
-                | Event::WindowEvent {
-                    event: WindowEvent::CloseRequested,
-                    ..
-                } => {
-                    *control_flow = ControlFlow::Exit;
-                }
-                Event::MainEventsCleared => {
-                    self.window.request_redraw();
-                }
-                Event::RedrawEventsCleared => {
-                    let now = Instant::now();
-                    self.imgui.io_mut().update_delta_time(now - last_frame);
-                    last_frame = now;
-
-                    let frame = match self.surface.get_current_texture() {
-                        Ok(frame) => frame,
-                        Err(e) => {
-                            eprintln!("dropped frame: {e:?}");
-                            return;
-                        }
-                    };
-                    self.platform
-                        .prepare_frame(self.imgui.io_mut(), &self.window)
-                        .expect("Failed to prepare frame");
-                    let ui = self.imgui.frame();
-
-                    if !self.pause {
-                        render(ui, &self.queue, &mut self.renderer);
-                    }
-
-                    // {
-                    //     let size = [width as f32, height as f32];
-                    //     let window = ui.window("Hello world");
-                    //     window
-                    //         .size([400.0, 600.0], Condition::FirstUseEver)
-                    //         .build(|| {
-                    //             ui.text("Hello textures!");
-                    //             ui.text("Say hello to checker.png");
-                    //             Image::new(lenna_texture_id, size).build(ui);
-                    //         });
-                    // }
-
-                    let mut encoder: wgpu::CommandEncoder = self
-                        .device
-                        .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-
-                    if last_cursor != Some(ui.mouse_cursor()) {
-                        last_cursor = Some(ui.mouse_cursor());
-                        self.platform.prepare_render(ui, &self.window);
-                    }
-
-                    let view = frame
-                        .texture
-                        .create_view(&wgpu::TextureViewDescriptor::default());
-                    let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                        label: None,
-                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                            view: &view,
-                            resolve_target: None,
-                            ops: wgpu::Operations {
-                                load: wgpu::LoadOp::Clear(clear_color),
-                                store: true,
-                            },
-                        })],
-                        depth_stencil_attachment: None,
-                    });
-
-                    self.renderer
-                        .render(self.imgui.render(), &self.queue, &self.device, &mut rpass)
-                        .expect("Rendering failed");
-
-                    drop(rpass);
-
-                    self.queue.submit(Some(encoder.finish()));
-                    frame.present();
-                }
-                _ => (),
-            }
-
-            self.platform
-                .handle_event(self.imgui.io_mut(), &self.window, &event);
-        });
+    fn new(event_loop: &ActiveEventLoop) -> Self {
+        let mut window = Self::setup_gpu(event_loop);
+        window.setup_imgui();
+        window
     }
 }
 
-pub fn start_ui(
-    l_rx: Receiver<Frame>,
-    r_rx: Receiver<Frame>,
-    f_rx: Receiver<Frame>,
+impl ApplicationHandler for App {
+    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        let mut window = AppWindow::new(event_loop);
+        self.renderer = Some(AppRenderer::new(
+            &mut window.device,
+            &mut window.imgui.as_mut().unwrap().renderer,
+        ));
+        self.window = Some(window);
+    }
 
-    l_raw_eye_rx: Receiver<EyeState>,
-    r_raw_eye_rx: Receiver<EyeState>,
-    filtered_eyes_rx: Receiver<(EyeState, EyeState)>,
-) -> JoinHandle<()> {
-    tokio::task::spawn_blocking(move || {
-        let mut ui = ui::UI::new();
+    fn window_event(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        window_id: winit::window::WindowId,
+        event: WindowEvent,
+    ) {
+        let window = self.window.as_mut().unwrap();
+        let imgui = window.imgui.as_mut().unwrap();
 
-        let mut l_texture = CameraTexture::new(&mut ui, Some("L texture"));
-        let mut r_texture = CameraTexture::new(&mut ui, Some("R texture"));
-        let mut f_texture = CameraTexture::new(&mut ui, Some("F texture"));
-
-        let mut l_rx = l_rx.clone();
-        let mut r_rx = r_rx.clone();
-        let mut f_rx = f_rx.clone();
-
-        let mut l_raw_eye_rx = l_raw_eye_rx.clone();
-        let mut r_raw_eye_rx = r_raw_eye_rx.clone();
-        let mut filtered_eyes_rx = filtered_eyes_rx.clone();
-
-        let mut l_raw_eye = EyeState::default();
-        let mut r_raw_eye = EyeState::default();
-        let mut filtered_eyes = (EyeState::default(), EyeState::default());
-
-        ui.run(move |ui, queue, renderer| {
-            l_texture.update_texture(&mut l_rx, queue, renderer);
-            r_texture.update_texture(&mut r_rx, queue, renderer);
-            f_texture.update_texture(&mut f_rx, queue, renderer);
-
-            l_raw_eye = l_raw_eye_rx.try_recv().unwrap_or(l_raw_eye);
-            r_raw_eye = r_raw_eye_rx.try_recv().unwrap_or(r_raw_eye);
-
-            filtered_eyes = filtered_eyes_rx.try_recv().unwrap_or(filtered_eyes);
-
-            ui.window("Camera Feeds").build(move || {
-                let group = ui.begin_group();
-                l_texture.build(ui);
-                let l_fps = l_texture.get_fps();
-                ui.text(format!("Left Eye, fps: {l_fps:03.1}"));
-                group.end();
-
-                ui.same_line();
-
-                let group = ui.begin_group();
-                r_texture.build(ui);
-                let r_fps = r_texture.get_fps();
-                ui.text(format!("Right Eye, fps: {r_fps:03.1}"));
-                group.end();
-
-                ui.same_line();
-
-                let group = ui.begin_group();
-                f_texture.build(ui);
-                let f_fps = f_texture.get_fps();
-                ui.text(format!("Face, fps: {f_fps:03.1}"));
-                group.end();
-            });
-
-            ui.window("Inference").build(move || {
-                // Cropped Camera Feeds
-
-                let draw_cropped_feed = |camera_texture: CameraTexture| {
-                    imgui::Image::new(
-                        camera_texture.get_texture_id(),
-                        [FRAME_RESIZE_W as f32, FRAME_RESIZE_H as f32],
-                    )
-                    .uv0([
-                        1.0 - FRAME_CROP_X as f32 / CAMERA_FRAME_SIZE as f32,
-                        FRAME_CROP_Y as f32 / CAMERA_FRAME_SIZE as f32,
-                    ])
-                    .uv1([
-                        1.0 - (FRAME_CROP_X + FRAME_CROP_W) as f32 / CAMERA_FRAME_SIZE as f32,
-                        (FRAME_CROP_Y + FRAME_CROP_H) as f32 / CAMERA_FRAME_SIZE as f32,
-                    ])
-                    .build(ui);
+        match &event {
+            WindowEvent::Resized(size) => {
+                window.surface_desc = wgpu::SurfaceConfiguration {
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                    format: wgpu::TextureFormat::Bgra8UnormSrgb,
+                    width: size.width,
+                    height: size.height,
+                    present_mode: wgpu::PresentMode::Fifo,
+                    desired_maximum_frame_latency: 2,
+                    alpha_mode: wgpu::CompositeAlphaMode::Auto,
+                    view_formats: vec![wgpu::TextureFormat::Bgra8Unorm],
                 };
 
-                ui.text(format!("Cropped Camera Feeds"));
-                let group = ui.begin_group();
-                draw_cropped_feed(l_texture);
-                ui.same_line();
-                draw_cropped_feed(r_texture);
-                group.end();
+                window
+                    .surface
+                    .configure(&window.device, &window.surface_desc);
+            }
+            WindowEvent::CloseRequested => {
+                event_loop.exit();
+                // TODO: find a better way?
+                std::process::exit(0);
+            }
+            // WindowEvent::KeyboardInput { event, .. } => {
+            //     if let Key::Named(NamedKey::Escape) = event.logical_key {
+            //         if event.state.is_pressed() {
+            //             event_loop.exit();
+            //         }
+            //     }
+            // }
+            WindowEvent::RedrawRequested => {
+                // let delta_s = imgui.last_frame.elapsed();
+                let now = Instant::now();
+                imgui
+                    .context
+                    .io_mut()
+                    .update_delta_time(now - imgui.last_frame);
+                imgui.last_frame = now;
 
-                // Generic eye state drawer
-
-                let draw_eyelid_state = |state: EyeState| {
-                    const WIDGET_W: f32 = 10.0;
-                    const WIDGET_H: f32 = 150.0;
-
-                    const COLOR_NORMAL: ImColor32 = ImColor32::from_rgb(0, 148, 255);
-                    const COLOR_WIDE: ImColor32 = ImColor32::from_rgb(127, 201, 255);
-
-                    const SPLIT_POINT: f32 = 0.75;
-
-                    let progress = state.eyelid;
-
-                    let draw_list = ui.get_window_draw_list();
-                    let position = ui.cursor_screen_pos();
-
-                    let zero_y = position[1] + WIDGET_H;
-                    let split_y = position[1] + WIDGET_H * (1.0 - progress.min(SPLIT_POINT));
-                    let one_y = position[1] + WIDGET_H * (1.0 - progress);
-
-                    draw_list
-                        .add_rect(
-                            [position[0], zero_y],
-                            [position[0] + WIDGET_W, split_y],
-                            COLOR_NORMAL,
-                        )
-                        .filled(true)
-                        .build();
-                    draw_list
-                        .add_rect(
-                            [position[0], split_y],
-                            [position[0] + WIDGET_W, one_y],
-                            COLOR_WIDE,
-                        )
-                        .filled(true)
-                        .build();
-
-                    // Advance cursor to avoid overlapping with next UI element
-                    ui.dummy([WIDGET_W, WIDGET_H]);
-                };
-
-                let draw_gaze_state = |state: EyeState| {
-                    const WIDGET_SIZE: f32 = 150.0;
-                    const FOV_SIZE: f32 = 0.95;
-                    const FOV_RANGE: f32 = 90.0;
-                    const FOV_RANGE_DIV_2: f32 = FOV_RANGE / 2.0;
-
-                    const GAZE_RADIUS: f32 = 5.0;
-
-                    const COLOR_BACKGROUND: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
-                    const COLOR_AXES: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
-                    const COLOR_CIRCLES: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
-                    const COLOR_GAZE: [f32; 4] = [0.0, 0.1, 0.4, 1.0];
-
-                    let position = ui.cursor_screen_pos();
-                    let size = WIDGET_SIZE;
-
-                    let draw_list = ui.get_window_draw_list();
-
-                    // Define the center of the drawing area
-                    let center = [position[0] + size * 0.5, position[1] + size * 0.5];
-
-                    // Define square corners
-                    let top_left = [center[0] - size * 0.5, center[1] - size * 0.5];
-                    let bottom_right = [center[0] + size * 0.5, center[1] + size * 0.5];
-
-                    // Draw white square
-                    draw_list
-                        .add_rect(top_left, bottom_right, COLOR_BACKGROUND)
-                        .filled(true)
-                        .build();
-
-                    // Draw axes
-                    draw_list
-                        .add_line(
-                            [center[0], top_left[1]],
-                            [center[0], bottom_right[1]],
-                            COLOR_AXES,
-                        )
-                        .build(); // Vertical axis
-                    draw_list
-                        .add_line(
-                            [top_left[0], center[1]],
-                            [bottom_right[0], center[1]],
-                            COLOR_AXES,
-                        )
-                        .build(); // Horizontal axis
-
-                    let max_radius = size * FOV_SIZE / 2.0;
-                    draw_list
-                        .add_circle(center, max_radius, COLOR_CIRCLES)
-                        .build();
-
-                    for i in (15..FOV_RANGE_DIV_2 as i32).step_by(15) {
-                        draw_list
-                            .add_circle(
-                                center,
-                                i as f32 / FOV_RANGE_DIV_2 * max_radius,
-                                COLOR_CIRCLES,
-                            )
-                            .build();
+                let frame = match window.surface.get_current_texture() {
+                    Ok(frame) => frame,
+                    Err(e) => {
+                        eprintln!("dropped frame: {e:?}");
+                        return;
                     }
+                };
+                imgui
+                    .platform
+                    .prepare_frame(imgui.context.io_mut(), &window.window)
+                    .expect("Failed to prepare frame");
+                let ui = imgui.context.frame();
 
+                let renderer = self.renderer.as_mut().unwrap();
+                renderer.update(
+                    &mut self.renderer_context,
+                    &window.queue,
+                    &mut imgui.renderer,
+                );
+                renderer.render(ui);
+
+                let mut encoder: wgpu::CommandEncoder = window
+                    .device
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+
+                if imgui.last_cursor != ui.mouse_cursor() {
+                    imgui.last_cursor = ui.mouse_cursor();
+                    imgui.platform.prepare_render(ui, &window.window);
+                }
+
+                let view = frame
+                    .texture
+                    .create_view(&wgpu::TextureViewDescriptor::default());
+                let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: None,
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(imgui.clear_color),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                });
+
+                imgui
+                    .renderer
+                    .render(
+                        imgui.context.render(),
+                        &window.queue,
+                        &window.device,
+                        &mut rpass,
+                    )
+                    .expect("Rendering failed");
+
+                drop(rpass);
+
+                window.queue.submit(Some(encoder.finish()));
+
+                frame.present();
+            }
+            _ => (),
+        }
+
+        imgui.platform.handle_event::<()>(
+            imgui.context.io_mut(),
+            &window.window,
+            &Event::WindowEvent { window_id, event },
+        );
+    }
+
+    fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: ()) {
+        let window = self.window.as_mut().unwrap();
+        let imgui = window.imgui.as_mut().unwrap();
+        imgui.platform.handle_event::<()>(
+            imgui.context.io_mut(),
+            &window.window,
+            &Event::UserEvent(event),
+        );
+    }
+
+    fn device_event(
+        &mut self,
+        _event_loop: &ActiveEventLoop,
+        device_id: winit::event::DeviceId,
+        event: winit::event::DeviceEvent,
+    ) {
+        let window = self.window.as_mut().unwrap();
+        let imgui = window.imgui.as_mut().unwrap();
+        imgui.platform.handle_event::<()>(
+            imgui.context.io_mut(),
+            &window.window,
+            &Event::DeviceEvent { device_id, event },
+        );
+    }
+
+    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
+        let window = self.window.as_mut().unwrap();
+        let imgui = window.imgui.as_mut().unwrap();
+        window.window.request_redraw();
+        imgui.platform.handle_event::<()>(
+            imgui.context.io_mut(),
+            &window.window,
+            &Event::AboutToWait,
+        );
+    }
+}
+
+// fn main() {
+//     // env_logger::init();
+
+//     let event_loop = EventLoop::new().unwrap();
+//     event_loop.set_control_flow(ControlFlow::Poll);
+//     event_loop.run_app(&mut App::default()).unwrap();
+// }
+
+pub struct AppRendererContext {
+    pub l_rx: Receiver<Frame>,
+    pub r_rx: Receiver<Frame>,
+    pub f_rx: Receiver<Frame>,
+
+    pub l_raw_rx: Receiver<EyeState>,
+    pub r_raw_rx: Receiver<EyeState>,
+    pub filtered_eyes_rx: Receiver<(EyeState, EyeState)>,
+}
+
+pub fn start_ui(renderer_context: AppRendererContext) {
+    // let event_loop = EventLoop::new().unwrap();
+
+    // // ControlFlow::Poll continuously runs the event loop, even if the OS hasn't
+    // // dispatched any events. This is ideal for games and similar applications.
+    // event_loop.set_control_flow(winit::event_loop::ControlFlow::Poll);
+
+    // let proxy = event_loop.create_proxy();
+
+    // let mut app_window = AppWindow::new(gui_receivers);
+    // // tokio::task::spawn_blocking(|| {});
+    // event_loop.run_app(&mut app_window).unwrap();
+
+    // TODO: This is blocking! Run on main thread and start an async runtime on another one?
+    let event_loop = EventLoop::new().unwrap();
+    event_loop.set_control_flow(ControlFlow::Poll);
+    event_loop.run_app(&mut App::new(renderer_context)).unwrap();
+}
+
+struct AppRenderer {
+    r_texture: CameraTexture,
+    f_texture: CameraTexture,
+    l_texture: CameraTexture,
+
+    l_raw_eye: EyeState,
+    r_raw_eye: EyeState,
+    filtered_eyes: (EyeState, EyeState),
+}
+
+impl AppRenderer {
+    fn new(device: &mut wgpu::Device, renderer: &mut imgui_wgpu::Renderer) -> Self {
+        AppRenderer {
+            l_texture: CameraTexture::new(device, renderer, Some("L texture")),
+            r_texture: CameraTexture::new(device, renderer, Some("R texture")),
+            f_texture: CameraTexture::new(device, renderer, Some("F texture")),
+
+            l_raw_eye: EyeState::default(),
+            r_raw_eye: EyeState::default(),
+            filtered_eyes: (EyeState::default(), EyeState::default()),
+        }
+    }
+
+    fn update(
+        &mut self,
+        renderer_context: &mut AppRendererContext,
+        queue: &wgpu::Queue,
+        renderer: &mut imgui_wgpu::Renderer,
+    ) {
+        self.l_texture
+            .update_texture(&mut renderer_context.l_rx, queue, renderer);
+        self.r_texture
+            .update_texture(&mut renderer_context.r_rx, queue, renderer);
+        self.f_texture
+            .update_texture(&mut renderer_context.f_rx, queue, renderer);
+
+        self.l_raw_eye = renderer_context
+            .l_raw_rx
+            .try_recv()
+            .unwrap_or(self.l_raw_eye);
+        self.r_raw_eye = renderer_context
+            .r_raw_rx
+            .try_recv()
+            .unwrap_or(self.r_raw_eye);
+
+        self.filtered_eyes = renderer_context
+            .filtered_eyes_rx
+            .try_recv()
+            .unwrap_or(self.filtered_eyes);
+    }
+
+    fn render(&self, ui: &imgui::Ui) {
+        ui.window("Camera Feeds").build(move || {
+            let group = ui.begin_group();
+            self.l_texture.build(ui);
+            let l_fps = self.l_texture.get_fps();
+            ui.text(format!("Left Eye, fps: {l_fps:03.1}"));
+            group.end();
+
+            ui.same_line();
+
+            let group = ui.begin_group();
+            self.r_texture.build(ui);
+            let r_fps = self.r_texture.get_fps();
+            ui.text(format!("Right Eye, fps: {r_fps:03.1}"));
+            group.end();
+
+            ui.same_line();
+
+            let group = ui.begin_group();
+            self.f_texture.build(ui);
+            let f_fps = self.f_texture.get_fps();
+            ui.text(format!("Face, fps: {f_fps:03.1}"));
+            group.end();
+        });
+
+        ui.window("Inference").build(move || {
+            // Cropped Camera Feeds
+
+            let draw_cropped_feed = |camera_texture: CameraTexture| {
+                imgui::Image::new(
+                    camera_texture.get_texture_id(),
+                    [FRAME_RESIZE_W as f32, FRAME_RESIZE_H as f32],
+                )
+                .uv0([
+                    1.0 - FRAME_CROP_X as f32 / CAMERA_FRAME_SIZE as f32,
+                    FRAME_CROP_Y as f32 / CAMERA_FRAME_SIZE as f32,
+                ])
+                .uv1([
+                    1.0 - (FRAME_CROP_X + FRAME_CROP_W) as f32 / CAMERA_FRAME_SIZE as f32,
+                    (FRAME_CROP_Y + FRAME_CROP_H) as f32 / CAMERA_FRAME_SIZE as f32,
+                ])
+                .build(ui);
+            };
+
+            ui.text(format!("Cropped Camera Feeds"));
+            let group = ui.begin_group();
+            draw_cropped_feed(self.l_texture);
+            ui.same_line();
+            draw_cropped_feed(self.r_texture);
+            group.end();
+
+            // Generic eye state drawer
+
+            let draw_eyelid_state = |state: EyeState| {
+                const WIDGET_W: f32 = 10.0;
+                const WIDGET_H: f32 = 150.0;
+
+                const COLOR_NORMAL: ImColor32 = ImColor32::from_rgb(0, 148, 255);
+                const COLOR_WIDE: ImColor32 = ImColor32::from_rgb(127, 201, 255);
+
+                const SPLIT_POINT: f32 = 0.75;
+
+                let progress = state.eyelid;
+
+                let draw_list = ui.get_window_draw_list();
+                let position = ui.cursor_screen_pos();
+
+                let zero_y = position[1] + WIDGET_H;
+                let split_y = position[1] + WIDGET_H * (1.0 - progress.min(SPLIT_POINT));
+                let one_y = position[1] + WIDGET_H * (1.0 - progress);
+
+                draw_list
+                    .add_rect(
+                        [position[0], zero_y],
+                        [position[0] + WIDGET_W, split_y],
+                        COLOR_NORMAL,
+                    )
+                    .filled(true)
+                    .build();
+                draw_list
+                    .add_rect(
+                        [position[0], split_y],
+                        [position[0] + WIDGET_W, one_y],
+                        COLOR_WIDE,
+                    )
+                    .filled(true)
+                    .build();
+
+                // Advance cursor to avoid overlapping with next UI element
+                ui.dummy([WIDGET_W, WIDGET_H]);
+            };
+
+            let draw_gaze_state = |state: EyeState| {
+                const WIDGET_SIZE: f32 = 150.0;
+                const FOV_SIZE: f32 = 0.95;
+                const FOV_RANGE: f32 = 90.0;
+                const FOV_RANGE_DIV_2: f32 = FOV_RANGE / 2.0;
+
+                const GAZE_RADIUS: f32 = 5.0;
+
+                const COLOR_BACKGROUND: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
+                const COLOR_AXES: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
+                const COLOR_CIRCLES: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
+                const COLOR_GAZE: [f32; 4] = [0.0, 0.1, 0.4, 1.0];
+
+                let position = ui.cursor_screen_pos();
+                let size = WIDGET_SIZE;
+
+                let draw_list = ui.get_window_draw_list();
+
+                // Define the center of the drawing area
+                let center = [position[0] + size * 0.5, position[1] + size * 0.5];
+
+                // Define square corners
+                let top_left = [center[0] - size * 0.5, center[1] - size * 0.5];
+                let bottom_right = [center[0] + size * 0.5, center[1] + size * 0.5];
+
+                // Draw white square
+                draw_list
+                    .add_rect(top_left, bottom_right, COLOR_BACKGROUND)
+                    .filled(true)
+                    .build();
+
+                // Draw axes
+                draw_list
+                    .add_line(
+                        [center[0], top_left[1]],
+                        [center[0], bottom_right[1]],
+                        COLOR_AXES,
+                    )
+                    .build(); // Vertical axis
+                draw_list
+                    .add_line(
+                        [top_left[0], center[1]],
+                        [bottom_right[0], center[1]],
+                        COLOR_AXES,
+                    )
+                    .build(); // Horizontal axis
+
+                let max_radius = size * FOV_SIZE / 2.0;
+                draw_list
+                    .add_circle(center, max_radius, COLOR_CIRCLES)
+                    .build();
+
+                for i in (15..FOV_RANGE_DIV_2 as i32).step_by(15) {
                     draw_list
                         .add_circle(
-                            [
-                                center[0] + state.yaw / FOV_RANGE_DIV_2 * max_radius,
-                                center[1] + state.pitch / FOV_RANGE_DIV_2 * max_radius,
-                            ],
-                            GAZE_RADIUS,
-                            COLOR_GAZE,
+                            center,
+                            i as f32 / FOV_RANGE_DIV_2 * max_radius,
+                            COLOR_CIRCLES,
                         )
-                        .filled(true)
                         .build();
+                }
 
-                    // Advance cursor to avoid overlapping with next UI element
-                    ui.dummy([size, size]);
-                };
+                draw_list
+                    .add_circle(
+                        [
+                            center[0] + state.yaw / FOV_RANGE_DIV_2 * max_radius,
+                            center[1] + state.pitch / FOV_RANGE_DIV_2 * max_radius,
+                        ],
+                        GAZE_RADIUS,
+                        COLOR_GAZE,
+                    )
+                    .filled(true)
+                    .build();
 
-                // Raw Eye State
+                // Advance cursor to avoid overlapping with next UI element
+                ui.dummy([size, size]);
+            };
 
-                ui.text(format!("Raw Eye State"));
-                let group = ui.begin_group();
-                draw_eyelid_state(l_raw_eye);
-                ui.same_line();
-                draw_gaze_state(l_raw_eye);
-                ui.same_line();
-                draw_gaze_state(r_raw_eye);
-                ui.same_line();
-                draw_eyelid_state(r_raw_eye);
-                group.end();
+            // Raw Eye State
 
-                // Filtered Eye State
+            ui.text(format!("Raw Eye State"));
+            let group = ui.begin_group();
+            draw_eyelid_state(self.l_raw_eye);
+            ui.same_line();
+            draw_gaze_state(self.l_raw_eye);
+            ui.same_line();
+            draw_gaze_state(self.r_raw_eye);
+            ui.same_line();
+            draw_eyelid_state(self.r_raw_eye);
+            group.end();
 
-                ui.text(format!("Filtered Eye State"));
-                let group = ui.begin_group();
-                draw_eyelid_state(filtered_eyes.0);
-                ui.same_line();
-                draw_gaze_state(filtered_eyes.0);
-                ui.same_line();
-                draw_gaze_state(filtered_eyes.1);
-                ui.same_line();
-                draw_eyelid_state(filtered_eyes.1);
-                group.end();
-            });
+            // Filtered Eye State
+
+            ui.text(format!("Filtered Eye State"));
+            let group = ui.begin_group();
+            draw_eyelid_state(self.filtered_eyes.0);
+            ui.same_line();
+            draw_gaze_state(self.filtered_eyes.0);
+            ui.same_line();
+            draw_gaze_state(self.filtered_eyes.1);
+            ui.same_line();
+            draw_eyelid_state(self.filtered_eyes.1);
+            group.end();
         });
-    })
+    }
 }

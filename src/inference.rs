@@ -2,7 +2,10 @@ use std::time::SystemTime;
 
 use async_broadcast::{Receiver, RecvError, Sender};
 use image::{DynamicImage, GenericImageView};
-use ort::session::{builder::GraphOptimizationLevel, Session};
+use ort::{
+    session::{Session, builder::GraphOptimizationLevel},
+    value::TensorRef,
+};
 use tokio::runtime::Handle;
 use tokio::task::JoinHandle;
 
@@ -44,7 +47,7 @@ pub fn eye_inference(
     let model_path = model_path.to_owned();
 
     tokio::task::spawn_blocking(move || {
-        let model = Session::builder()
+        let mut model = Session::builder()
             .unwrap()
             .with_optimization_level(GraphOptimizationLevel::Level3)
             .unwrap()
@@ -98,10 +101,12 @@ pub fn eye_inference(
                 .to_shape((1, FRAME_RESIZE_W as usize, FRAME_RESIZE_H as usize, 1))
                 .unwrap();
 
-            let outputs = model.run(ort::inputs![&array].unwrap()).unwrap();
+            let tensor = TensorRef::from_array_view(&array).unwrap();
+
+            let outputs = model.run(ort::inputs![tensor]).unwrap();
             let output = outputs.iter().next().unwrap().1;
             let output = output.try_extract_tensor::<f32>().unwrap();
-            let output = output.flatten();
+            let output = output.1;
 
             let _ = handle.block_on(async {
                 tx.broadcast_direct(EyeState {
