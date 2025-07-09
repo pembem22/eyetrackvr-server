@@ -67,6 +67,10 @@ pub fn merge_eyes(
                 Eye::R => r_eye_state = state,
             };
 
+            // Create copies to not modify original values.
+            let mut l_eye_state = l_eye_state;
+            let mut r_eye_state = r_eye_state;
+
             // Average pitch.
             {
                 let avg_pitch = (l_eye_state.pitch + r_eye_state.pitch) / 2.0;
