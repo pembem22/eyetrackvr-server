@@ -6,8 +6,8 @@ use tokio::task::JoinHandle;
 use one_euro_rs::OneEuroFilter;
 use tokio_stream::StreamExt;
 
-use crate::inference::EyeState;
 use crate::Eye;
+use crate::inference::EyeState;
 
 pub fn filter_eye(mut rx: Receiver<EyeState>, tx: Sender<EyeState>) -> JoinHandle<()> {
     tokio::spawn(async move {
@@ -60,7 +60,7 @@ pub fn merge_eyes(
         let mut r_eye_state: EyeState = Default::default();
 
         while let Some((eye, state)) = eyes_rx.next().await {
-            println!("{:?} {:?}", eye, state);
+            println!("{eye:?} {state:?}");
 
             match eye {
                 Eye::L => l_eye_state = state,

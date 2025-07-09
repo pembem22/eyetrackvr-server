@@ -111,7 +111,7 @@ impl AppRenderer {
                 .build(ui);
             };
 
-            ui.text(format!("Cropped Camera Feeds"));
+            ui.text("Cropped Camera Feeds");
             let group = ui.begin_group();
             draw_cropped_feed(self.l_texture);
             ui.same_line();
@@ -239,7 +239,7 @@ impl AppRenderer {
 
             // Raw Eye State
 
-            ui.text(format!("Raw Eye State"));
+            ui.text("Raw Eye State");
             let group = ui.begin_group();
             draw_eyelid_state(self.l_raw_eye);
             ui.same_line();
@@ -252,7 +252,7 @@ impl AppRenderer {
 
             // Filtered Eye State
 
-            ui.text(format!("Filtered Eye State"));
+            ui.text("Filtered Eye State");
             let group = ui.begin_group();
             draw_eyelid_state(self.filtered_eyes.0);
             ui.same_line();

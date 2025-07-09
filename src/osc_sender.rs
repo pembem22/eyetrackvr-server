@@ -2,7 +2,7 @@ use std::time::SystemTime;
 
 use async_broadcast::Receiver;
 use const_format::concatcp;
-use rosc::{encoder, OscBundle, OscMessage, OscPacket, OscType};
+use rosc::{OscBundle, OscMessage, OscPacket, OscType, encoder};
 use tokio::net::UdpSocket;
 use tokio_stream::StreamExt;
 

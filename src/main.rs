@@ -173,7 +173,8 @@ fn configure_tasks(args: &Args) -> tokio_serial::Result<Vec<JoinHandle<()>>> {
         {
             use crate::ui::AppRendererContext;
 
-            let ui = start_ui(AppRendererContext {
+            // FIXME: rn blocks the thread here.
+            start_ui(AppRendererContext {
                 l_rx: l_cam_rx.clone(),
                 r_rx: r_cam_rx.clone(),
                 f_rx: f_cam_rx.clone(),

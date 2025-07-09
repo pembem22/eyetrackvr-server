@@ -1,7 +1,7 @@
 use std::time::SystemTime;
 
 use async_broadcast::Receiver;
-use futures::{future::join_all, SinkExt};
+use futures::{SinkExt, future::join_all};
 use serde_json::Value;
 use tokio::{
     fs::{self, create_dir_all},
@@ -42,7 +42,7 @@ pub fn start_frame_server(l_rx: Receiver<Frame>, r_rx: Receiver<Frame>) -> JoinH
                 while let Some(message) = framed.next().await {
                     match message {
                         Ok(bytes) => {
-                            println!("bytes: {:?}", bytes);
+                            println!("bytes: {bytes:?}");
 
                             let json: Value = match serde_json::from_str(&bytes) {
                                 Ok(parsed) => parsed,
@@ -124,7 +124,7 @@ pub fn start_frame_server(l_rx: Receiver<Frame>, r_rx: Receiver<Frame>) -> JoinH
 
                             let _ = framed.send("k").await;
                         }
-                        Err(err) => println!("Socket closed with error: {:?}", err),
+                        Err(err) => println!("Socket closed with error: {err:?}"),
                     }
                 }
                 println!("Socket received FIN packet and closed connection");

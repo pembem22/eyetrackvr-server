@@ -184,7 +184,7 @@ impl Camera {
 
             'connect_loop: loop {
                 if reconnect {
-                    println!("Reconnecting in a sec to {}", url);
+                    println!("Reconnecting in a sec to {url}");
                     sleep(Duration::from_secs(1)).await;
                 }
                 reconnect = true;
