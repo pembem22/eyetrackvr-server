@@ -11,7 +11,7 @@ use inference::eye_inference;
 use osc_sender::start_osc_sender;
 use tokio::task::JoinHandle;
 #[cfg(feature = "gui")]
-use ui::start_ui;
+use window::start_ui;
 
 mod app;
 mod camera;
@@ -26,6 +26,8 @@ mod inference;
 mod osc_sender;
 #[cfg(feature = "gui")]
 mod ui;
+#[cfg(feature = "gui")]
+mod window;
 
 use crate::{app::App, camera::*};
 
