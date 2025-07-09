@@ -72,7 +72,7 @@ impl AppRenderer {
             let group = ui.begin_group();
             self.l_texture.build(ui);
             let l_fps = self.l_texture.get_fps();
-            ui.text(format!("Left Eye, fps: {l_fps:03.1}"));
+            ui.text(format!("Left Eye, FPS: {l_fps:03}"));
             group.end();
 
             ui.same_line();
@@ -80,7 +80,7 @@ impl AppRenderer {
             let group = ui.begin_group();
             self.r_texture.build(ui);
             let r_fps = self.r_texture.get_fps();
-            ui.text(format!("Right Eye, fps: {r_fps:03.1}"));
+            ui.text(format!("Right Eye, FPS: {r_fps:03}"));
             group.end();
 
             ui.same_line();
@@ -88,7 +88,7 @@ impl AppRenderer {
             let group = ui.begin_group();
             self.f_texture.build(ui);
             let f_fps = self.f_texture.get_fps();
-            ui.text(format!("Face, fps: {f_fps:03.1}"));
+            ui.text(format!("Face, FPS: {f_fps:03}"));
             group.end();
         });
 

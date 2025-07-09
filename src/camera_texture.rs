@@ -12,6 +12,10 @@ pub struct CameraTexture {
     last_delta: Duration,
     last_timestamp: SystemTime,
     texture_id: imgui::TextureId,
+
+    last_second: SystemTime,
+    frames_since_last_second: u32,
+    last_fps: u32,
 }
 
 impl CameraTexture {
@@ -37,6 +41,10 @@ impl CameraTexture {
             last_delta: Duration::ZERO,
             last_timestamp: SystemTime::now(),
             texture_id: renderer.textures.insert(texture),
+
+            last_second: SystemTime::now(),
+            frames_since_last_second: 0,
+            last_fps: 0,
         }
     }
 
@@ -70,6 +78,9 @@ impl CameraTexture {
 
         self.last_delta = frame.timestamp.duration_since(self.last_timestamp).unwrap();
         self.last_timestamp = frame.timestamp;
+
+        self.update_fps();
+        self.frames_since_last_second += 1;
     }
 
     pub fn build(self, ui: &imgui::Ui) {
@@ -86,7 +97,20 @@ impl CameraTexture {
         self.texture_id
     }
 
-    pub fn get_fps(self) -> f32 {
-        1.0 / self.last_delta.as_secs_f32()
+    pub fn get_fps(&self) -> u32 {
+        // Can't do this here, cause self needs to be mutable,
+        // which breaks stuff in imgui closures.
+        // self.update_fps();
+        self.last_fps
+    }
+
+    fn update_fps(&mut self) {
+        let now = SystemTime::now();
+        if now.duration_since(self.last_second).unwrap().as_secs() > 0 {
+            self.last_fps = self.frames_since_last_second;
+
+            self.last_second = now;
+            self.frames_since_last_second = 0;
+        }
     }
 }
