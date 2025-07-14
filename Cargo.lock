@@ -1021,11 +1021,14 @@ dependencies = [
  "imgui",
  "imgui-wgpu",
  "imgui-winit-support",
+ "jni",
  "mime",
  "multipart-stream",
  "ndarray",
  "nokhwa",
+ "once_cell",
  "one-euro-rs",
+ "openxr-sys",
  "ort",
  "ort-sys",
  "pollster",
@@ -2612,6 +2615,15 @@ dependencies = [
  "libc",
  "pkg-config",
  "vcpkg",
+]
+
+[[package]]
+name = "openxr-sys"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f10e7e38c47f2175fc39363713b656db899fa0b4a14341029702cbdfa6f44d05"
+dependencies = [
+ "libc",
 ]
 
 [[package]]

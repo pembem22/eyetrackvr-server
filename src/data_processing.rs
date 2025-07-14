@@ -78,29 +78,29 @@ pub fn merge_eyes(
                 r_eye_state.pitch = avg_pitch;
             }
 
-            // Makes the result jittery, probably cause of not synchronous data from L and R cams.
-            /*
-            // Clamp convergence point at infinity.
-            if l_eye_state.yaw < r_eye_state.yaw {
-                let avg_yaw = (l_eye_state.yaw + l_eye_state.yaw) / 2.0;
-                l_eye_state.yaw = avg_yaw;
-                r_eye_state.yaw = avg_yaw;
-            }
+            // // Makes the result jittery, probably cause of not synchronous data from L and R cams.
+            
+            // // Clamp convergence point at infinity.
+            // if l_eye_state.yaw < r_eye_state.yaw {
+            //     let avg_yaw = (l_eye_state.yaw + r_eye_state.yaw) / 2.0;
+            //     l_eye_state.yaw = avg_yaw;
+            //     r_eye_state.yaw = avg_yaw;
+            // }
 
-            // Clamp converge point up close.
-            {
-                // TODO: Make IPD configurable.
-                const IPD: f32 = 0.063; // Median IPD 63mm
-                const MIN_FOCUS_DIST: f32 = 0.03; // 3cm
-                let max_angle: f32 = f32::atan(IPD / (2.0 * MIN_FOCUS_DIST));
-                if (l_eye_state.yaw - r_eye_state.yaw).abs() > 2.0 * max_angle {
-                    // Clamp both yaws symmetrically around their average.
-                    let avg_yaw = (l_eye_state.yaw + l_eye_state.yaw) / 2.0;
-                    l_eye_state.yaw = avg_yaw - max_angle;
-                    r_eye_state.yaw = avg_yaw + max_angle;
-                }
-            }
-            */
+            // // Clamp converge point up close.
+            // {
+            //     // TODO: Make IPD configurable.
+            //     const IPD: f32 = 0.063; // Median IPD 63mm
+            //     const MIN_FOCUS_DIST: f32 = 0.03; // 3cm
+            //     let max_angle: f32 = f32::atan(IPD / (2.0 * MIN_FOCUS_DIST));
+            //     if (l_eye_state.yaw - r_eye_state.yaw).abs() > 2.0 * max_angle {
+            //         // Clamp both yaws symmetrically around their average.
+            //         let avg_yaw = (l_eye_state.yaw + r_eye_state.yaw) / 2.0;
+            //         l_eye_state.yaw = avg_yaw - max_angle;
+            //         r_eye_state.yaw = avg_yaw + max_angle;
+            //     }
+            // }
+            
 
             tx.broadcast_direct((l_eye_state, r_eye_state))
                 .await
