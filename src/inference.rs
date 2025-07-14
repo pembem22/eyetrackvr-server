@@ -1,5 +1,3 @@
-use std::time::SystemTime;
-
 use async_broadcast::{Receiver, RecvError, Sender};
 use image::{DynamicImage, GenericImageView};
 use ort::{
@@ -9,26 +7,8 @@ use ort::{
 use tokio::runtime::Handle;
 use tokio::task::JoinHandle;
 
-use crate::{Eye, Frame};
-
-#[derive(Copy, Clone, Debug)]
-pub struct EyeState {
-    pub pitch: f32,
-    pub yaw: f32,
-    pub eyelid: f32,
-    pub timestamp: SystemTime,
-}
-
-impl Default for EyeState {
-    fn default() -> Self {
-        Self {
-            pitch: 0.0,
-            yaw: 0.0,
-            eyelid: 1.0,
-            timestamp: SystemTime::UNIX_EPOCH,
-        }
-    }
-}
+use crate::camera::{Eye, Frame};
+use crate::structs::EyeState;
 
 pub const FRAME_CROP_X: u32 = 30;
 pub const FRAME_CROP_Y: u32 = 30;

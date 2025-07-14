@@ -46,7 +46,7 @@ impl Camera {
         Camera { eye, sender }
     }
 
-    pub fn start(&self, path: String) -> tokio_serial::Result<JoinHandle<()>> {
+    pub fn start(&self, path: String) -> JoinHandle<()> {
         if path.starts_with("COM") {
             self.connect_serial(path)
         } else if path.starts_with("UVC") {
@@ -56,7 +56,7 @@ impl Camera {
         }
     }
 
-    fn connect_serial(&self, tty_path: String) -> tokio_serial::Result<JoinHandle<()>> {
+    fn connect_serial(&self, tty_path: String) -> JoinHandle<()> {
         let sender = self.sender.clone();
 
         let future = async move {
@@ -173,10 +173,10 @@ impl Camera {
             }
         };
 
-        Ok(tokio::spawn(future))
+        tokio::spawn(future)
     }
 
-    fn connect_http(&self, url: String) -> tokio_serial::Result<JoinHandle<()>> {
+    fn connect_http(&self, url: String) -> JoinHandle<()> {
         let sender = self.sender.clone();
 
         let future = async move {
@@ -250,10 +250,10 @@ impl Camera {
             }
         };
 
-        Ok(tokio::spawn(future))
+        tokio::spawn(future)
     }
 
-    fn connect_uvc(&self, uvc_index: u32) -> tokio_serial::Result<JoinHandle<()>> {
+    fn connect_uvc(&self, uvc_index: u32) -> JoinHandle<()> {
         let sender = self.sender.clone();
 
         let future = async move {
@@ -299,6 +299,6 @@ impl Camera {
             }
         };
 
-        Ok(tokio::spawn(future))
+        tokio::spawn(future)
     }
 }

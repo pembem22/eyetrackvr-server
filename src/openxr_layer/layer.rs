@@ -418,7 +418,7 @@ impl OpenXRLayer {
             path,
             buffer.len().try_into().unwrap(),
             &mut out_size as *mut u32,
-            buffer.as_mut_ptr() as *mut i8,
+            buffer.as_mut_ptr() as *mut u8,
         );
 
         CStr::from_bytes_until_nul(&buffer[..out_size as usize])

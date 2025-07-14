@@ -5,7 +5,7 @@ use image::DynamicImage;
 use imgui::TextureId;
 use imgui_wgpu::{Texture, TextureConfig};
 
-use crate::{CAMERA_FRAME_SIZE, Frame};
+use crate::camera::{CAMERA_FRAME_SIZE, Frame};
 
 #[derive(Clone, Copy)]
 pub struct CameraTexture {

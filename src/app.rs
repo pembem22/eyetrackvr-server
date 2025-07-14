@@ -1,9 +1,8 @@
 use async_broadcast::{InactiveReceiver, Sender};
 use tokio::task::JoinHandle;
 
-use crate::Frame;
-use crate::inference::EyeState;
-use crate::{Camera, Eye};
+use crate::camera::{Camera, Eye, Frame};
+use crate::structs::EyeState;
 
 // Utility for creating a broadcast pair with 1 element queue, overflow on, and deactivated receiver.
 pub fn broadcast<T>() -> (Sender<T>, InactiveReceiver<T>) {
@@ -98,11 +97,11 @@ impl App {
         l_tty_path: String,
         r_tty_path: String,
         f_tty_path: String,
-    ) -> tokio_serial::Result<(JoinHandle<()>, JoinHandle<()>, JoinHandle<()>)> {
-        Ok((
-            self.l_camera.start(l_tty_path)?,
-            self.r_camera.start(r_tty_path)?,
-            self.f_camera.start(f_tty_path)?,
-        ))
+    ) -> (JoinHandle<()>, JoinHandle<()>, JoinHandle<()>) {
+        (
+            self.l_camera.start(l_tty_path),
+            self.r_camera.start(r_tty_path),
+            self.f_camera.start(f_tty_path),
+        )
     }
 }

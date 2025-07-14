@@ -8,7 +8,7 @@ use hyper::{
 use tokio::task::JoinHandle;
 use tokio_stream::StreamExt;
 
-use crate::Frame;
+use crate::camera::Frame;
 
 type BoxedError = Box<dyn std::error::Error + Send + Sync>;
 

@@ -12,7 +12,7 @@ use tokio::{
 use tokio_stream::StreamExt;
 use tokio_util::codec::{Decoder, LinesCodec};
 
-use crate::Frame;
+use crate::camera::Frame;
 
 pub fn start_frame_server(l_rx: Receiver<Frame>, r_rx: Receiver<Frame>) -> JoinHandle<()> {
     tokio::spawn(async move {

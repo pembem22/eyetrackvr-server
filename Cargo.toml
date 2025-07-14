@@ -3,6 +3,9 @@ name = "eyetrackvr-server"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+crate-type = ["rlib", "cdylib"]
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
@@ -40,11 +43,12 @@ winit = { version = "0.30.11", optional = true }
 
 [features]
 # TODO: look into VSCode Rust extension configuration to avoid enabling everything by default.
-default = ["inference", "gui", "openxr-api-layer", "android"]
+default = ["inference", "gui", "openxr-api-layer", "android", "desktop"]
 inference = ["dep:ort", "dep:ort-sys"]
 gui = ["dep:imgui", "dep:imgui-wgpu", "dep:imgui-winit-support", "dep:wgpu", "dep:winit"]
 openxr-api-layer = ["dep:openxr-sys"]
 android = ["dep:jni"]
+desktop = [] # Or should I name it "standalone"?
 
 [patch.crates-io]
 mio-serial = { git = "https://github.com/pembem22/mio-serial.git", branch = "fix-stop-bits" }

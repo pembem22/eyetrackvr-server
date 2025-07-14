@@ -76,13 +76,41 @@ fn enum_and_open_devices(env: &JNIEnv, app_context: JObject) -> jni::errors::Res
 }
 */
 
+use futures::future::try_join_all;
+use tokio::task::JoinHandle;
+
+use crate::{app::App, camera_server::start_camera_server};
+
 pub fn main() {
     println!("Hello from Android main!");
     let rt = tokio::runtime::Runtime::new().unwrap();
     rt.block_on(async {
-        println!("hello");
+        println!("Hello from Tokio runtime!");
+
+        let app = App::new();
+
+        try_join_all(start_android_tasks(&app)).await.unwrap()
     });
     println!("Started Tokio runtime");
 }
 
-fn setup_android_tasks() {}
+fn start_android_tasks(app: &App) -> Vec<JoinHandle<()>> {
+    let mut tasks = Vec::new();
+
+    let (l_camera, r_camera, f_camera) = app.start_cameras(
+        "http://localhost:8080/30:30:F9:33:DD:7C".to_string(),
+        "http://localhost:8080/30:30:F9:17:F3:C4".to_string(),
+        "http://localhost:8080/DC:DA:0C:18:32:34".to_string(),
+    );
+    tasks.push(l_camera);
+    tasks.push(r_camera);
+    tasks.push(f_camera);
+
+    // HTTP server to mirror the cameras
+    tasks.push(start_camera_server(
+        app.l_cam_rx.activate_cloned(),
+        app.f_cam_rx.activate_cloned(),
+    ));
+
+    tasks
+}

@@ -1,9 +1,9 @@
-use crate::camera::CAMERA_FRAME_SIZE;
+use crate::camera::{CAMERA_FRAME_SIZE, Frame};
+use crate::camera_texture::CameraTexture;
 use crate::inference::{
-    EyeState, FRAME_CROP_H, FRAME_CROP_W, FRAME_CROP_X, FRAME_CROP_Y, FRAME_RESIZE_H,
-    FRAME_RESIZE_W,
+    FRAME_CROP_H, FRAME_CROP_W, FRAME_CROP_X, FRAME_CROP_Y, FRAME_RESIZE_H, FRAME_RESIZE_W,
 };
-use crate::{Frame, camera_texture::CameraTexture};
+use crate::structs::EyeState;
 use async_broadcast::Receiver;
 use imgui::ImColor32;
 

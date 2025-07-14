@@ -6,8 +6,8 @@ use tokio::task::JoinHandle;
 use one_euro_rs::OneEuroFilter;
 use tokio_stream::StreamExt;
 
-use crate::Eye;
-use crate::inference::EyeState;
+use crate::camera::Eye;
+use crate::structs::EyeState;
 
 pub fn filter_eye(mut rx: Receiver<EyeState>, tx: Sender<EyeState>) -> JoinHandle<()> {
     tokio::spawn(async move {
