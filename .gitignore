@@ -2,3 +2,6 @@
 /images
 
 **/*.onnx
+
+apk
+.env

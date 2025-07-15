@@ -108,8 +108,9 @@ fn start_android_tasks(app: &App) -> Vec<JoinHandle<()>> {
 
     // HTTP server to mirror the cameras
     tasks.push(start_camera_server(
-        app.l_cam_rx.activate_cloned(),
-        app.f_cam_rx.activate_cloned(),
+        app.l_cam_rx.clone(),
+        app.r_cam_rx.clone(),
+        app.f_cam_rx.clone(),
     ));
 
     tasks

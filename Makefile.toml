@@ -1,0 +1,87 @@
+# Put the rest of variables in here.
+env_files = ["./.env"]
+
+[env]
+APK_FILE              = "apk/android-steamlinkvr-release.apk"
+DECOMPILED_DIR        = "apk/decompiled"
+LIB_NAME              = "libeyetrackvr_server.so"
+LIB_SRC               = "target/aarch64-linux-android/release"
+LIB_DST               = "${DECOMPILED_DIR}/lib/arm64-v8a"
+OPENXR_LAYER_JSON     = "openxr-layer.json"
+OPENXR_LAYER_JSON_SRC = "android"
+OPENXR_LAYER_JSON_DST = "${DECOMPILED_DIR}/assets/openxr/1/api_layers/implicit.d"
+MANIFEST_PATCH        = "android/manifest.patch.xml"
+# DEBUG_KEYSTORE        = "~/.android/debug.keystore"
+KEY_ALIAS             = "androiddebugkey"
+KEY_PASS              = "android"
+OUT_APK               = "apk/app-patched.apk"
+# Input and output can't be same file
+ZIPALIGNED_APK        = "apk/app-patched-zipaligned.apk"
+# APKTOOL_PATH        = "path/to/apktool"
+# APKSIGNER_PATH      = "path/to/apksigner"
+# ZIPALIGN_PATH       = "path/to/apksigner"
+
+
+[tasks.decompile]
+script_runner = "@duckscript"
+script = '''
+rm -r ${DECOMPILED_DIR}
+workspace_dir = pwd
+exec ${APKTOOL_PATH} d -f ${workspace_dir}/${APK_FILE} -o ${workspace_dir}/${DECOMPILED_DIR}
+'''
+
+[tasks.copy_json]
+script_runner = "@duckscript"
+script = '''
+mkdir ${OPENXR_LAYER_JSON_DST}
+cp ${OPENXR_LAYER_JSON_SRC}/${OPENXR_LAYER_JSON} ${OPENXR_LAYER_JSON_DST}/${OPENXR_LAYER_JSON}
+'''
+
+[tasks.copy_lib]
+script_runner = "@duckscript"
+script = '''
+mkdir ${LIB_DST}
+cp ${LIB_SRC}/${LIB_NAME} ${LIB_DST}/${LIB_NAME}
+'''
+
+[tasks.patch_manifest]
+command = "python"
+args = ["tools/patch_manifest.py", "${DECOMPILED_DIR}/AndroidManifest.xml", "${workspace_dir}/${MANIFEST_PATCH}"]
+
+[tasks.rebuild]
+script_runner = "@duckscript"
+script = '''
+workspace_dir = pwd
+exec ${APKTOOL_PATH} b ${workspace_dir}/${DECOMPILED_DIR} -o ${workspace_dir}/${OUT_APK}
+'''
+
+[tasks.zipalign]
+script_runner = "@duckscript"
+script = '''
+workspace_dir = pwd
+exec ${ZIPALIGN_PATH} -p -f -v 4 ${workspace_dir}/${OUT_APK} ${workspace_dir}/${ZIPALIGNED_APK}
+'''
+
+[tasks.sign]
+script_runner = "@duckscript"
+script = '''
+workspace_dir = pwd
+exec ${APKSIGNER_PATH} sign --ks ${DEBUG_KEYSTORE} --ks-key-alias ${KEY_ALIAS} --ks-pass pass:${KEY_PASS} ${workspace_dir}/${ZIPALIGNED_APK}
+'''
+
+[tasks.push]
+command = "adb"
+args = ["install", "${ZIPALIGNED_APK}"]
+
+[tasks.apk]
+description = "Patch the APK and push"
+dependencies = [
+  "decompile",
+  "copy_json",
+  "copy_lib",
+  # "patch_manifest",
+  "rebuild",
+  "zipalign",
+  "sign",
+  "push"
+]
