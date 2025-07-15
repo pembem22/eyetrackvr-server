@@ -87,146 +87,151 @@ pub unsafe extern "system" fn xr_create_api_layer_instance(
     instance_create_info_ptr: *const InstanceCreateInfo,
     api_layer_info_ptr: *const ApiLayerCreateInfo,
     instance: *mut Instance,
-) -> Result { unsafe {
-    println!("--> xr_create_api_layer_instance");
+) -> Result {
+    unsafe {
+        println!("--> xr_create_api_layer_instance");
 
-    // Call the chain to create the instance.
-    let mut chain_instance_create_info = *instance_create_info_ptr;
+        // Call the chain to create the instance.
+        let mut chain_instance_create_info = *instance_create_info_ptr;
 
-    // Hide our extension from the list assuming it's in the beginning.
-    // This is to avoid an `ERROR_EXTENSION_NOT_PRESENT` error from the runtime.
-    chain_instance_create_info.enabled_extension_count -= 1;
-    chain_instance_create_info.enabled_extension_names =
-        chain_instance_create_info.enabled_extension_names.add(1);
+        // Hide our extension from the list assuming it's in the beginning.
+        // This is to avoid an `ERROR_EXTENSION_NOT_PRESENT` error from the runtime.
+        chain_instance_create_info.enabled_extension_count -= 1;
+        chain_instance_create_info.enabled_extension_names =
+            chain_instance_create_info.enabled_extension_names.add(1);
 
-    let api_layer_info = *api_layer_info_ptr;
-    let mut chain_api_layer_info = api_layer_info;
-    chain_api_layer_info.next_info = (*api_layer_info.next_info).next;
-    let result = ((*api_layer_info.next_info).next_create_api_layer_instance)(
-        &chain_instance_create_info,
-        &chain_api_layer_info,
-        instance,
-    );
+        let api_layer_info = *api_layer_info_ptr;
+        let mut chain_api_layer_info = api_layer_info;
+        chain_api_layer_info.next_info = (*api_layer_info.next_info).next;
+        let result = ((*api_layer_info.next_info).next_create_api_layer_instance)(
+            &chain_instance_create_info,
+            &chain_api_layer_info,
+            instance,
+        );
 
-    println!("xr_create_api_layer_instance result: {result:?}");
+        println!("xr_create_api_layer_instance result: {result:?}");
 
-    if result == Result::SUCCESS {
-        // Create our layer.
-        INSTANCE.get_instance_proc_addr =
-            Some((*api_layer_info.next_info).next_get_instance_proc_addr);
-        INSTANCE.instance = Some(*instance);
+        if result == Result::SUCCESS {
+            // Create our layer.
+            INSTANCE.get_instance_proc_addr =
+                Some((*api_layer_info.next_info).next_get_instance_proc_addr);
+            INSTANCE.instance = Some(*instance);
+        }
+
+        println!("<-- xr_create_api_layer_instance");
+
+        result
     }
-
-    println!("<-- xr_create_api_layer_instance");
-
-    result
-}}
+}
 
 pub unsafe extern "system" fn xr_get_instance_proc_addr(
     instance: Instance,
     name_ptr: *const c_char,
     function: *mut Option<pfn::VoidFunction>,
-) -> Result { unsafe {
-    let api_name = CStr::from_ptr(name_ptr).to_string_lossy().to_string();
-    if instance == Instance::NULL
-        && !(api_name == "xrEnumerateInstanceExtensionProperties"
-            || api_name == "xrEnumerateApiLayerProperties"
-            || api_name == "xrCreateInstance")
-    {
-        return Result::ERROR_HANDLE_INVALID;
-    }
+) -> Result {
+    unsafe {
+        let api_name = CStr::from_ptr(name_ptr).to_string_lossy().to_string();
+        if instance == Instance::NULL
+            && !(api_name == "xrEnumerateInstanceExtensionProperties"
+                || api_name == "xrEnumerateApiLayerProperties"
+                || api_name == "xrCreateInstance")
+        {
+            return Result::ERROR_HANDLE_INVALID;
+        }
 
-    println!(
-        "xr_get_instance_proc_addr {:?} {}",
-        instance,
-        CStr::from_ptr(name_ptr).to_str().unwrap()
-    );
-
-    let result = INSTANCE.get_instance_proc_addr.unwrap()(instance, name_ptr, function);
-
-    /*
-    if api_name == "xrEnumerateInstanceExtensionProperties" {
-        INSTANCE.enumerate_instance_extensions_properties = Some(std::mem::transmute::<
-            pfn::VoidFunction,
-            pfn::EnumerateInstanceExtensionProperties,
-        >((*function).unwrap()));
-        *function = Some(std::mem::transmute::<
-            pfn::EnumerateInstanceExtensionProperties,
-            pfn::VoidFunction,
-        >(xr_enumerate_instance_extension_properties));
-    }
-
-    if api_name == "xrGetSystemProperties" {
-        INSTANCE.get_system_properties = Some(std::mem::transmute::<
-            pfn::VoidFunction,
-            pfn::GetSystemProperties,
-        >((*function).unwrap()));
-        *function = Some(std::mem::transmute::<
-            pfn::GetSystemProperties,
-            pfn::VoidFunction,
-        >(xr_get_system_properties));
-    }
-
-    if api_name == "xrSuggestInteractionProfileBindings" {
-        INSTANCE.suggest_interaction_profile_bindings = Some(std::mem::transmute::<
-            pfn::VoidFunction,
-            pfn::SuggestInteractionProfileBindings,
-        >((*function).unwrap()));
-        *function = Some(std::mem::transmute::<
-            pfn::SuggestInteractionProfileBindings,
-            pfn::VoidFunction,
-        >(xr_suggest_interaction_profile_bindings));
-    }
-
-    if api_name == "xrCreateActionSpace" {
-        INSTANCE.create_action_space = Some(std::mem::transmute::<
-            pfn::VoidFunction,
-            pfn::CreateActionSpace,
-        >((*function).unwrap()));
-        *function = Some(std::mem::transmute::<
-            pfn::CreateActionSpace,
-            pfn::VoidFunction,
-        >(xr_create_action_space));
-    }
-
-    if api_name == "xrGetActionStatePose" {
-        INSTANCE.get_action_state_pose = Some(std::mem::transmute::<
-            pfn::VoidFunction,
-            pfn::GetActionStatePose,
-        >((*function).unwrap()));
-        *function = Some(std::mem::transmute::<
-            pfn::GetActionStatePose,
-            pfn::VoidFunction,
-        >(xr_get_action_state_pose));
-    }
-
-    if api_name == "xrLocateSpace" {
-        INSTANCE.locate_space = Some(std::mem::transmute::<pfn::VoidFunction, pfn::LocateSpace>(
-            (*function).unwrap(),
-        ));
-        *function = Some(std::mem::transmute::<pfn::LocateSpace, pfn::VoidFunction>(
-            xr_locate_space,
-        ));
-    }
-
-    if api_name == "xrLocateViews" {
-        INSTANCE.locate_views = Some(std::mem::transmute::<pfn::VoidFunction, pfn::LocateViews>(
-            (*function).unwrap(),
-        ));
-        *function = Some(std::mem::transmute::<pfn::LocateViews, pfn::VoidFunction>(
-            xr_locate_views,
-        ));
-    }
-    */
-
-    if api_name == "xrPathToString" {
-        INSTANCE.path_to_string = Some(
-            std::mem::transmute::<pfn::VoidFunction, pfn::PathToString>((*function).unwrap()),
+        println!(
+            "xr_get_instance_proc_addr {:?} {}",
+            instance,
+            CStr::from_ptr(name_ptr).to_str().unwrap()
         );
-    }
 
-    result
-}}
+        let result = INSTANCE.get_instance_proc_addr.unwrap()(instance, name_ptr, function);
+
+        /*
+        if api_name == "xrEnumerateInstanceExtensionProperties" {
+            INSTANCE.enumerate_instance_extensions_properties = Some(std::mem::transmute::<
+                pfn::VoidFunction,
+                pfn::EnumerateInstanceExtensionProperties,
+            >((*function).unwrap()));
+            *function = Some(std::mem::transmute::<
+                pfn::EnumerateInstanceExtensionProperties,
+                pfn::VoidFunction,
+            >(xr_enumerate_instance_extension_properties));
+        }
+
+        if api_name == "xrGetSystemProperties" {
+            INSTANCE.get_system_properties = Some(std::mem::transmute::<
+                pfn::VoidFunction,
+                pfn::GetSystemProperties,
+            >((*function).unwrap()));
+            *function = Some(std::mem::transmute::<
+                pfn::GetSystemProperties,
+                pfn::VoidFunction,
+            >(xr_get_system_properties));
+        }
+
+        if api_name == "xrSuggestInteractionProfileBindings" {
+            INSTANCE.suggest_interaction_profile_bindings = Some(std::mem::transmute::<
+                pfn::VoidFunction,
+                pfn::SuggestInteractionProfileBindings,
+            >((*function).unwrap()));
+            *function = Some(std::mem::transmute::<
+                pfn::SuggestInteractionProfileBindings,
+                pfn::VoidFunction,
+            >(xr_suggest_interaction_profile_bindings));
+        }
+
+        if api_name == "xrCreateActionSpace" {
+            INSTANCE.create_action_space = Some(std::mem::transmute::<
+                pfn::VoidFunction,
+                pfn::CreateActionSpace,
+            >((*function).unwrap()));
+            *function = Some(std::mem::transmute::<
+                pfn::CreateActionSpace,
+                pfn::VoidFunction,
+            >(xr_create_action_space));
+        }
+
+        if api_name == "xrGetActionStatePose" {
+            INSTANCE.get_action_state_pose = Some(std::mem::transmute::<
+                pfn::VoidFunction,
+                pfn::GetActionStatePose,
+            >((*function).unwrap()));
+            *function = Some(std::mem::transmute::<
+                pfn::GetActionStatePose,
+                pfn::VoidFunction,
+            >(xr_get_action_state_pose));
+        }
+
+        if api_name == "xrLocateSpace" {
+            INSTANCE.locate_space = Some(std::mem::transmute::<pfn::VoidFunction, pfn::LocateSpace>(
+                (*function).unwrap(),
+            ));
+            *function = Some(std::mem::transmute::<pfn::LocateSpace, pfn::VoidFunction>(
+                xr_locate_space,
+            ));
+        }
+
+        if api_name == "xrLocateViews" {
+            INSTANCE.locate_views = Some(std::mem::transmute::<pfn::VoidFunction, pfn::LocateViews>(
+                (*function).unwrap(),
+            ));
+            *function = Some(std::mem::transmute::<pfn::LocateViews, pfn::VoidFunction>(
+                xr_locate_views,
+            ));
+        }
+        */
+
+        if api_name == "xrPathToString" {
+            INSTANCE.path_to_string = Some(std::mem::transmute::<
+                pfn::VoidFunction,
+                pfn::PathToString,
+            >((*function).unwrap()));
+        }
+
+        result
+    }
+}
 
 /*
 unsafe extern "system" fn xr_enumerate_instance_extension_properties(

@@ -411,7 +411,7 @@ impl OpenXRLayer {
     */
 
     pub unsafe fn path_to_string(&self, path: Path) -> String { unsafe {
-        let mut buffer = vec![0u8; 128];
+        let mut buffer = [0u8; 128];
         let mut out_size = 0u32;
         self.path_to_string.unwrap()(
             self.instance.unwrap(),
