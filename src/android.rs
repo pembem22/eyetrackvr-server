@@ -83,15 +83,17 @@ use crate::{app::App, camera_server::start_camera_server};
 
 pub fn main() {
     println!("Hello from Android main!");
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(async {
-        println!("Hello from Tokio runtime!");
+    std::thread::spawn(|| {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            println!("Hello from Tokio runtime!");
 
-        let app = App::new();
+            let app = App::new();
 
-        try_join_all(start_android_tasks(&app)).await.unwrap()
+            try_join_all(start_android_tasks(&app)).await.unwrap()
+        });
     });
-    println!("Started Tokio runtime");
+    println!("Started Tokio runtime thread");
 }
 
 fn start_android_tasks(app: &App) -> Vec<JoinHandle<()>> {
