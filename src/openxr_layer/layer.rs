@@ -1,18 +1,26 @@
 use std::{
     collections::HashMap,
-    ffi::CStr,
+    ffi::{CStr, c_void},
+    ptr,
     time::SystemTime,
 };
 
+use once_cell::sync::Lazy;
 use openxr_sys::{
-    Action, Path, Space, pfn,
+    Action, BaseInStructure, CompositionLayerBaseHeader, CompositionLayerFlags,
+    CompositionLayerQuad, Extent2Df, Extent2Di, EyeVisibility, FrameEndInfo,
+    GraphicsBindingOpenGLESAndroidKHR, Instance, LoaderInitInfoBaseHeaderKHR, Offset2Di, Path,
+    Posef, Quaternionf, Rect2Di, ReferenceSpaceCreateInfo, ReferenceSpaceType, Session,
+    SessionCreateInfo, Space, Swapchain, SwapchainCreateFlags, SwapchainCreateInfo,
+    SwapchainSubImage, SwapchainUsageFlags, Vector3f, pfn,
 };
 
-use once_cell::sync::Lazy;
+#[cfg(feature = "android")]
+use openxr_sys::LoaderInitInfoAndroidKHR;
 
 // use crate::server::OSCServer;
 
-pub static mut INSTANCE: Lazy<OpenXRLayer> = Lazy::new(OpenXRLayer::new);
+pub static mut LAYER: Lazy<OpenXRLayer> = Lazy::new(OpenXRLayer::new);
 
 struct Extension {
     name: &'static str,
@@ -26,6 +34,8 @@ const ADVERTISED_EXTENSIONS: &[Extension] = &[Extension {
 
 pub struct OpenXRLayer {
     pub instance: Option<openxr_sys::Instance>,
+    pub session: Option<openxr_sys::Session>,
+
     pub get_instance_proc_addr: Option<pfn::GetInstanceProcAddr>,
     pub enumerate_instance_extensions_properties: Option<pfn::EnumerateInstanceExtensionProperties>,
     pub get_system_properties: Option<pfn::GetSystemProperties>,
@@ -35,6 +45,22 @@ pub struct OpenXRLayer {
     pub get_action_state_pose: Option<pfn::GetActionStatePose>,
     pub locate_space: Option<pfn::LocateSpace>,
     pub locate_views: Option<pfn::LocateViews>,
+    pub end_frame: Option<pfn::EndFrame>,
+
+    pub create_session: Option<pfn::CreateSession>,
+    pub initalize_loader_khr: Option<pfn::InitializeLoaderKHR>,
+    pub create_swapchain: Option<pfn::CreateSwapchain>,
+    pub create_reference_space: Option<pfn::CreateReferenceSpace>,
+
+    pub application_vm: *mut c_void,
+    pub application_context: *mut c_void,
+
+    pub gles_display: *mut c_void,
+    pub gles_config: *mut c_void,
+    pub gles_context: *mut c_void,
+
+    debug_window_swapchain: Option<Swapchain>,
+    view_reference_space: Option<Space>,
 
     possible_spaces: HashMap<(Action, Path), Space>,
 
@@ -48,8 +74,10 @@ pub struct OpenXRLayer {
 
 impl OpenXRLayer {
     pub fn new() -> OpenXRLayer {
-        let res = OpenXRLayer {
+        OpenXRLayer {
             instance: None,
+            session: None,
+
             get_instance_proc_addr: None,
             enumerate_instance_extensions_properties: None,
             get_system_properties: None,
@@ -62,16 +90,233 @@ impl OpenXRLayer {
             get_action_state_pose: None,
             locate_space: None,
             locate_views: None,
+            create_session: None,
+            initalize_loader_khr: None,
+            create_swapchain: None,
+            end_frame: None,
+            create_reference_space: None,
             possible_spaces: HashMap::new(),
             start_time: SystemTime::now(),
             // server: OSCServer::new(),
+            application_context: ptr::null_mut(),
+            application_vm: ptr::null_mut(),
+
+            gles_display: ptr::null_mut(),
+            gles_config: ptr::null_mut(),
+            gles_context: ptr::null_mut(),
+
+            debug_window_swapchain: None,
+            view_reference_space: None,
+        }
+    }
+
+    fn on_session_created(&mut self) {
+        let session = self.session.unwrap();
+
+        let swapchain_create_info = SwapchainCreateInfo {
+            ty: openxr_sys::StructureType::SWAPCHAIN_CREATE_INFO,
+            next: ptr::null_mut(),
+
+            create_flags: SwapchainCreateFlags::EMPTY,
+            // TODO: Set the proper flags, those are copied from Steam Link.
+            usage_flags: SwapchainUsageFlags::COLOR_ATTACHMENT | SwapchainUsageFlags::SAMPLED,
+            format: 35907, // OpenGL ES 3 GL_SRGB8_ALPHA8
+            sample_count: 1,
+            width: 1344,
+            height: 1344,
+            face_count: 1,
+            array_size: 1,
+            mip_count: 1,
         };
 
-        // FIXME: Possibly deadlock if tries to access the Layer singleton?
-        crate::android::main();
+        let mut swapchain = Swapchain::NULL;
 
-        res
+        unsafe {
+            let result = self.create_swapchain(session, &swapchain_create_info, &mut swapchain);
+            assert_eq!(
+                result,
+                openxr_sys::Result::SUCCESS,
+                "failed to create swapchain"
+            );
+        };
+
+        self.debug_window_swapchain = Some(swapchain);
+
+        let reference_space_create_info = ReferenceSpaceCreateInfo {
+            ty: openxr_sys::StructureType::REFERENCE_SPACE_CREATE_INFO,
+            next: ptr::null(),
+            reference_space_type: ReferenceSpaceType::VIEW,
+            pose_in_reference_space: Posef::IDENTITY,
+        };
+
+        let mut view_reference_space = Space::NULL;
+        assert_eq!(
+            unsafe {
+                self.create_reference_space.unwrap()(
+                    session,
+                    &reference_space_create_info,
+                    &mut view_reference_space,
+                )
+            },
+            openxr_sys::Result::SUCCESS
+        );
+        self.view_reference_space = Some(view_reference_space);
     }
+
+    pub unsafe fn create_session(
+        &mut self,
+        instance: Instance,
+        create_info: *const SessionCreateInfo,
+        session: *mut Session,
+    ) -> openxr_sys::Result {
+        unsafe {
+            self.instance = Some(instance);
+
+            let create_info = &*create_info;
+            let next = &*(create_info.next as *const BaseInStructure);
+
+            println!("create_info {create_info:?}");
+            println!("create_info.next {next:?}");
+
+            assert_eq!(
+                next.ty,
+                openxr_sys::StructureType::GRAPHICS_BINDING_OPENGL_ES_ANDROID_KHR
+            );
+
+            let graphics_binding_open_glesandroid_khr =
+                &*(create_info.next as *mut GraphicsBindingOpenGLESAndroidKHR);
+
+            println!(
+                "graphics_binding_open_glesandroid_khr {graphics_binding_open_glesandroid_khr:?}"
+            );
+
+            let result = self.create_session.unwrap()(instance, create_info, session);
+
+            if result != openxr_sys::Result::SUCCESS {
+                return result;
+            }
+
+            self.session = Some(*session);
+
+            self.on_session_created();
+
+            openxr_sys::Result::SUCCESS
+        }
+    }
+
+    pub unsafe fn initalize_loader_khr(
+        &mut self,
+        loader_init_info: *const LoaderInitInfoBaseHeaderKHR,
+    ) -> openxr_sys::Result {
+        unsafe {
+            // OpenXR is only for Android so far.
+            assert_eq!(
+                (*loader_init_info).ty,
+                openxr_sys::StructureType::LOADER_INIT_INFO_ANDROID_KHR
+            );
+
+            let loader_init_info_android = &*(loader_init_info as *const LoaderInitInfoAndroidKHR);
+
+            println!("loader_init_info_android: {loader_init_info_android:?}");
+
+            self.application_context = loader_init_info_android.application_context;
+            self.application_vm = loader_init_info_android.application_vm;
+
+            // From the OpenXR specs:
+            // If the xrInitializeLoaderKHR function is discovered through the manifest,
+            // xrInitializeLoaderKHR will be called before xrNegotiateLoaderRuntimeInterface or
+            // xrNegotiateLoaderApiLayerInterface has been called on the runtime or layer respectively.
+            //
+            // Means we cannot call the next xrInitializeLoaderKHR function here to return the result.
+            openxr_sys::Result::SUCCESS
+        }
+    }
+
+    pub unsafe fn create_swapchain(
+        &self,
+        session: Session,
+        create_info: *const SwapchainCreateInfo,
+        swapchain: *mut Swapchain,
+    ) -> openxr_sys::Result {
+        unsafe {
+            println!("create_info: {:?}", *create_info);
+
+            let result = self.create_swapchain.unwrap()(session, create_info, swapchain);
+
+            println!("swapchain: {:?}", *swapchain);
+
+            result
+        }
+    }
+
+    pub unsafe fn end_frame(
+        &self,
+        session: Session,
+        frame_end_info: *const FrameEndInfo,
+    ) -> openxr_sys::Result {
+        // Create our copy of FrameEndInfo.
+        let mut frame_end_info = unsafe { *frame_end_info };
+
+        let original_layer_count = frame_end_info.layer_count as usize;
+        let original_layers =
+            unsafe { std::slice::from_raw_parts(frame_end_info.layers, original_layer_count) };
+
+        // TODO: Don't reallocate every frame.
+        let mut layers = Vec::<*const CompositionLayerBaseHeader>::new();
+        layers.reserve_exact(original_layer_count + 1);
+        layers.extend_from_slice(original_layers);
+
+        let my_layer = CompositionLayerQuad {
+            ty: openxr_sys::StructureType::COMPOSITION_LAYER_QUAD,
+            next: ptr::null(),
+            eye_visibility: EyeVisibility::BOTH,
+            layer_flags: CompositionLayerFlags::EMPTY,
+            space: self.view_reference_space.unwrap(),
+            pose: Posef {
+                position: Vector3f {
+                    x: 0.0,
+                    y: 0.0,
+                    z: -1.0,
+                },
+                orientation: Quaternionf {
+                    x: -0.002,
+                    y: -0.670,
+                    z: 0.223,
+                    w: 0.708,
+                },
+            },
+            size: Extent2Df {
+                width: 0.1,
+                height: 0.1,
+            },
+            sub_image: SwapchainSubImage {
+                swapchain: self.debug_window_swapchain.unwrap(),
+                image_rect: Rect2Di {
+                    extent: Extent2Di {
+                        width: 1280,
+                        height: 720,
+                    },
+                    offset: Offset2Di { x: 0, y: 0 },
+                },
+                image_array_index: 0,
+            },
+        };
+
+        // TODO: Is there a better way to do this cast?
+        layers
+            .push((&my_layer as *const CompositionLayerQuad) as *const CompositionLayerBaseHeader);
+
+        frame_end_info.layer_count = layers.len() as u32;
+        frame_end_info.layers = layers.as_ptr();
+
+        assert_eq!(
+            unsafe { self.end_frame.unwrap()(session, &frame_end_info) },
+            openxr_sys::Result::SUCCESS
+        );
+
+        openxr_sys::Result::SUCCESS
+    }
+
     /*
     pub unsafe fn enumerate_instance_extension_properties(
         &self,
@@ -410,21 +655,23 @@ impl OpenXRLayer {
     }
     */
 
-    pub unsafe fn path_to_string(&self, path: Path) -> String { unsafe {
-        let mut buffer = [0u8; 128];
-        let mut out_size = 0u32;
-        self.path_to_string.unwrap()(
-            self.instance.unwrap(),
-            path,
-            buffer.len().try_into().unwrap(),
-            &mut out_size as *mut u32,
-            buffer.as_mut_ptr() as *mut u8,
-        );
+    pub unsafe fn path_to_string(&self, path: Path) -> String {
+        unsafe {
+            let mut buffer = [0u8; 128];
+            let mut out_size = 0u32;
+            self.path_to_string.unwrap()(
+                self.instance.unwrap(),
+                path,
+                buffer.len().try_into().unwrap(),
+                &mut out_size as *mut u32,
+                buffer.as_mut_ptr() as *mut u8,
+            );
 
-        CStr::from_bytes_until_nul(&buffer[..out_size as usize])
-            .unwrap()
-            .to_str()
-            .unwrap()
-            .to_string()
-    }}
+            CStr::from_bytes_until_nul(&buffer[..out_size as usize])
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .to_string()
+        }
+    }
 }

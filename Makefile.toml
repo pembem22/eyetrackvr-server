@@ -46,7 +46,7 @@ cp ${LIB_SRC}/${LIB_NAME} ${LIB_DST}/${LIB_NAME}
 
 [tasks.patch_manifest]
 command = "python"
-args = ["tools/patch_manifest.py", "${DECOMPILED_DIR}/AndroidManifest.xml", "${workspace_dir}/${MANIFEST_PATCH}"]
+args = ["android/patch_manifest.py", "${DECOMPILED_DIR}/AndroidManifest.xml", "${MANIFEST_PATCH}"]
 
 [tasks.rebuild]
 script_runner = "@duckscript"
@@ -79,7 +79,7 @@ dependencies = [
   "decompile",
   "copy_json",
   "copy_lib",
-  # "patch_manifest",
+  "patch_manifest",
   "rebuild",
   "zipalign",
   "sign",

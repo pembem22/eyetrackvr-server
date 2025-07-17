@@ -1,8 +1,17 @@
+// FIXME: Apparently this is undefined behavior, figure this out.
+#![warn(static_mut_refs)]
+
 use std::ffi::CStr;
 use std::ffi::c_char;
 
-use crate::openxr_layer::layer::INSTANCE;
+use crate::openxr_layer::layer::LAYER;
 
+use openxr_sys::FrameEndInfo;
+use openxr_sys::LoaderInitInfoBaseHeaderKHR;
+use openxr_sys::Session;
+use openxr_sys::SessionCreateInfo;
+use openxr_sys::Swapchain;
+use openxr_sys::SwapchainCreateInfo;
 use openxr_sys::{Instance, Result, pfn};
 
 use openxr_sys::{InstanceCreateInfo, loader::ApiLayerCreateInfo};
@@ -95,6 +104,7 @@ pub unsafe extern "system" fn xr_create_api_layer_instance(
         let mut chain_instance_create_info = *instance_create_info_ptr;
 
         // Hide our extension from the list assuming it's in the beginning.
+        // Reduce the extension count by one and move the pointer one forward.
         // This is to avoid an `ERROR_EXTENSION_NOT_PRESENT` error from the runtime.
         chain_instance_create_info.enabled_extension_count -= 1;
         chain_instance_create_info.enabled_extension_names =
@@ -111,17 +121,40 @@ pub unsafe extern "system" fn xr_create_api_layer_instance(
 
         println!("xr_create_api_layer_instance result: {result:?}");
 
-        if result == Result::SUCCESS {
-            // Create our layer.
-            INSTANCE.get_instance_proc_addr =
-                Some((*api_layer_info.next_info).next_get_instance_proc_addr);
-            INSTANCE.instance = Some(*instance);
+        if result != Result::SUCCESS {
+            return result;
         }
+
+        {
+            let layer = &mut LAYER;
+            // Create our layer.
+            layer.get_instance_proc_addr =
+                Some((*api_layer_info.next_info).next_get_instance_proc_addr);
+            layer.instance = Some(*instance);
+        }
+
+        crate::android::main();
 
         println!("<-- xr_create_api_layer_instance");
 
-        result
+        Result::SUCCESS
     }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn xrGetInstanceProcAddr(
+    instance: Instance,
+    name_ptr: *const c_char,
+    function: *mut Option<pfn::VoidFunction>,
+) -> openxr_sys::Result {
+    unsafe { xr_get_instance_proc_addr(instance, name_ptr, function) }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn xrInitializeLoaderKHR(
+    loader_init_info: *const LoaderInitInfoBaseHeaderKHR,
+) -> openxr_sys::Result {
+    unsafe { xr_initialize_loader_khr(loader_init_info) }
 }
 
 pub unsafe extern "system" fn xr_get_instance_proc_addr(
@@ -145,92 +178,96 @@ pub unsafe extern "system" fn xr_get_instance_proc_addr(
             CStr::from_ptr(name_ptr).to_str().unwrap()
         );
 
-        let result = INSTANCE.get_instance_proc_addr.unwrap()(instance, name_ptr, function);
+        let layer = &mut LAYER;
 
-        /*
-        if api_name == "xrEnumerateInstanceExtensionProperties" {
-            INSTANCE.enumerate_instance_extensions_properties = Some(std::mem::transmute::<
-                pfn::VoidFunction,
-                pfn::EnumerateInstanceExtensionProperties,
-            >((*function).unwrap()));
-            *function = Some(std::mem::transmute::<
-                pfn::EnumerateInstanceExtensionProperties,
-                pfn::VoidFunction,
-            >(xr_enumerate_instance_extension_properties));
+        let result = layer.get_instance_proc_addr.unwrap()(instance, name_ptr, function);
+
+        if result != openxr_sys::Result::SUCCESS {
+            return result;
         }
 
-        if api_name == "xrGetSystemProperties" {
-            INSTANCE.get_system_properties = Some(std::mem::transmute::<
-                pfn::VoidFunction,
-                pfn::GetSystemProperties,
-            >((*function).unwrap()));
-            *function = Some(std::mem::transmute::<
-                pfn::GetSystemProperties,
-                pfn::VoidFunction,
-            >(xr_get_system_properties));
+        if api_name == "xrCreateSession" {
+            layer.create_session = Some(
+                std::mem::transmute::<pfn::VoidFunction, pfn::CreateSession>((*function).unwrap()),
+            );
+            *function = Some(
+                std::mem::transmute::<pfn::CreateSession, pfn::VoidFunction>(xr_create_session),
+            );
         }
-
-        if api_name == "xrSuggestInteractionProfileBindings" {
-            INSTANCE.suggest_interaction_profile_bindings = Some(std::mem::transmute::<
-                pfn::VoidFunction,
-                pfn::SuggestInteractionProfileBindings,
-            >((*function).unwrap()));
-            *function = Some(std::mem::transmute::<
-                pfn::SuggestInteractionProfileBindings,
-                pfn::VoidFunction,
-            >(xr_suggest_interaction_profile_bindings));
-        }
-
-        if api_name == "xrCreateActionSpace" {
-            INSTANCE.create_action_space = Some(std::mem::transmute::<
-                pfn::VoidFunction,
-                pfn::CreateActionSpace,
-            >((*function).unwrap()));
-            *function = Some(std::mem::transmute::<
-                pfn::CreateActionSpace,
-                pfn::VoidFunction,
-            >(xr_create_action_space));
-        }
-
-        if api_name == "xrGetActionStatePose" {
-            INSTANCE.get_action_state_pose = Some(std::mem::transmute::<
-                pfn::VoidFunction,
-                pfn::GetActionStatePose,
-            >((*function).unwrap()));
-            *function = Some(std::mem::transmute::<
-                pfn::GetActionStatePose,
-                pfn::VoidFunction,
-            >(xr_get_action_state_pose));
-        }
-
-        if api_name == "xrLocateSpace" {
-            INSTANCE.locate_space = Some(std::mem::transmute::<pfn::VoidFunction, pfn::LocateSpace>(
-                (*function).unwrap(),
-            ));
-            *function = Some(std::mem::transmute::<pfn::LocateSpace, pfn::VoidFunction>(
-                xr_locate_space,
-            ));
-        }
-
-        if api_name == "xrLocateViews" {
-            INSTANCE.locate_views = Some(std::mem::transmute::<pfn::VoidFunction, pfn::LocateViews>(
-                (*function).unwrap(),
-            ));
-            *function = Some(std::mem::transmute::<pfn::LocateViews, pfn::VoidFunction>(
-                xr_locate_views,
-            ));
-        }
-        */
 
         if api_name == "xrPathToString" {
-            INSTANCE.path_to_string = Some(std::mem::transmute::<
-                pfn::VoidFunction,
-                pfn::PathToString,
-            >((*function).unwrap()));
+            layer.path_to_string = Some(
+                std::mem::transmute::<pfn::VoidFunction, pfn::PathToString>((*function).unwrap()),
+            );
         }
 
-        result
+        if api_name == "xrInitializeLoaderKHR" {
+            layer.initalize_loader_khr = Some(std::mem::transmute::<
+                pfn::VoidFunction,
+                pfn::InitializeLoaderKHR,
+            >((*function).unwrap()));
+            *function = Some(std::mem::transmute::<
+                pfn::InitializeLoaderKHR,
+                pfn::VoidFunction,
+            >(xr_initialize_loader_khr));
+        }
+
+        if api_name == "xrCreateSwapchain" {
+            layer.create_swapchain = Some(std::mem::transmute::<
+                pfn::VoidFunction,
+                pfn::CreateSwapchain,
+            >((*function).unwrap()));
+            *function = Some(
+                std::mem::transmute::<pfn::CreateSwapchain, pfn::VoidFunction>(xr_create_swapchain),
+            );
+        }
+
+        if api_name == "xrEndFrame" {
+            layer.end_frame = Some(std::mem::transmute::<pfn::VoidFunction, pfn::EndFrame>(
+                (*function).unwrap(),
+            ));
+            *function = Some(std::mem::transmute::<pfn::EndFrame, pfn::VoidFunction>(
+                xr_end_frame,
+            ));
+        }
+
+        if api_name == "xrCreateReferenceSpace" {
+            layer.create_reference_space = Some(
+                std::mem::transmute::<pfn::VoidFunction, pfn::CreateReferenceSpace>((*function).unwrap()),
+            );
+        }
+
+        openxr_sys::Result::SUCCESS
     }
+}
+
+unsafe extern "system" fn xr_create_session(
+    instance: Instance,
+    create_info: *const SessionCreateInfo,
+    session: *mut Session,
+) -> Result {
+    unsafe { LAYER.create_session(instance, create_info, session) }
+}
+
+unsafe extern "system" fn xr_initialize_loader_khr(
+    loader_init_info: *const LoaderInitInfoBaseHeaderKHR,
+) -> Result {
+    unsafe { LAYER.initalize_loader_khr(loader_init_info) }
+}
+
+unsafe extern "system" fn xr_create_swapchain(
+    session: Session,
+    create_info: *const SwapchainCreateInfo,
+    swapchain: *mut Swapchain,
+) -> Result {
+    unsafe { LAYER.create_swapchain(session, create_info, swapchain) }
+}
+
+unsafe extern "system" fn xr_end_frame(
+    session: Session,
+    frame_end_info: *const FrameEndInfo,
+) -> Result {
+    unsafe { LAYER.end_frame(session, frame_end_info) }
 }
 
 /*

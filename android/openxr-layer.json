@@ -7,7 +7,8 @@
     "implementation_version": "1",
     "description": "Inject eye tracking as the XR_EXT_eye_gaze_interaction extension",
     "functions": {
-      "xrNegotiateLoaderApiLayerInterface": "xrNegotiateLoaderApiLayerInterface"
+      "xrNegotiateLoaderApiLayerInterface": "xrNegotiateLoaderApiLayerInterface",
+      "xrInitializeLoaderKHR": "xrInitializeLoaderKHR"
     },
     "instance_extensions": [
       {
