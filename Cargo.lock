@@ -1028,6 +1028,7 @@ dependencies = [
  "nokhwa",
  "once_cell",
  "one-euro-rs",
+ "openxr",
  "openxr-sys",
  "ort",
  "ort-sys",
@@ -2615,6 +2616,18 @@ dependencies = [
  "libc",
  "pkg-config",
  "vcpkg",
+]
+
+[[package]]
+name = "openxr"
+version = "0.19.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2a2d6934d2508f94fd4cbda6c2a326f111f60ce59fd9136df6d478564397dd40"
+dependencies = [
+ "libc",
+ "libloading",
+ "ndk-context",
+ "openxr-sys",
 ]
 
 [[package]]

@@ -6,6 +6,8 @@ use std::ffi::c_char;
 
 use crate::openxr_layer::layer::LAYER;
 
+use openxr::{self as xr};
+
 use openxr_sys::FrameEndInfo;
 use openxr_sys::LoaderInitInfoBaseHeaderKHR;
 use openxr_sys::Session;
@@ -125,13 +127,19 @@ pub unsafe extern "system" fn xr_create_api_layer_instance(
             return result;
         }
 
-        {
-            let layer = &mut LAYER;
-            // Create our layer.
-            layer.get_instance_proc_addr =
-                Some((*api_layer_info.next_info).next_get_instance_proc_addr);
-            layer.instance = Some(*instance);
-        }
+        let get_instance_proc_addr = (*api_layer_info.next_info).next_get_instance_proc_addr;
+
+        let entry = xr::Entry::from_get_instance_proc_addr(get_instance_proc_addr).unwrap();
+        let instance = xr::Instance::from_raw(
+            entry.clone(),
+            *instance,
+            xr::InstanceExtensions::load(&entry, *instance, &xr::ExtensionSet::default()).unwrap(),
+        )
+        .unwrap();
+
+        let layer = &mut LAYER;
+        layer.get_instance_proc_addr = Some(get_instance_proc_addr);
+        layer.instance = Some(instance);
 
         crate::android::main();
 
@@ -195,12 +203,6 @@ pub unsafe extern "system" fn xr_get_instance_proc_addr(
             );
         }
 
-        if api_name == "xrPathToString" {
-            layer.path_to_string = Some(
-                std::mem::transmute::<pfn::VoidFunction, pfn::PathToString>((*function).unwrap()),
-            );
-        }
-
         if api_name == "xrInitializeLoaderKHR" {
             layer.initalize_loader_khr = Some(std::mem::transmute::<
                 pfn::VoidFunction,
@@ -232,9 +234,10 @@ pub unsafe extern "system" fn xr_get_instance_proc_addr(
         }
 
         if api_name == "xrCreateReferenceSpace" {
-            layer.create_reference_space = Some(
-                std::mem::transmute::<pfn::VoidFunction, pfn::CreateReferenceSpace>((*function).unwrap()),
-            );
+            layer.create_reference_space = Some(std::mem::transmute::<
+                pfn::VoidFunction,
+                pfn::CreateReferenceSpace,
+            >((*function).unwrap()));
         }
 
         openxr_sys::Result::SUCCESS

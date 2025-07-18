@@ -1,19 +1,15 @@
-use std::{
-    collections::HashMap,
-    ffi::{CStr, c_void},
-    ptr,
-    time::SystemTime,
-};
+use std::{collections::HashMap, ffi::c_void, ptr, time::SystemTime};
 
 use once_cell::sync::Lazy;
 use openxr_sys::{
-    Action, BaseInStructure, CompositionLayerBaseHeader, CompositionLayerFlags,
+    self as xr_sys, BaseInStructure, CompositionLayerBaseHeader, CompositionLayerFlags,
     CompositionLayerQuad, Extent2Df, Extent2Di, EyeVisibility, FrameEndInfo,
-    GraphicsBindingOpenGLESAndroidKHR, Instance, LoaderInitInfoBaseHeaderKHR, Offset2Di, Path,
-    Posef, Quaternionf, Rect2Di, ReferenceSpaceCreateInfo, ReferenceSpaceType, Session,
-    SessionCreateInfo, Space, Swapchain, SwapchainCreateFlags, SwapchainCreateInfo,
-    SwapchainSubImage, SwapchainUsageFlags, Vector3f, pfn,
+    GraphicsBindingOpenGLESAndroidKHR, LoaderInitInfoBaseHeaderKHR, Offset2Di, Posef, Quaternionf,
+    Rect2Di, SessionCreateInfo, SwapchainCreateFlags, SwapchainCreateInfo, SwapchainSubImage,
+    SwapchainUsageFlags, Vector3f, pfn,
 };
+
+use openxr::{self as xr};
 
 #[cfg(feature = "android")]
 use openxr_sys::LoaderInitInfoAndroidKHR;
@@ -33,8 +29,8 @@ const ADVERTISED_EXTENSIONS: &[Extension] = &[Extension {
 }];
 
 pub struct OpenXRLayer {
-    pub instance: Option<openxr_sys::Instance>,
-    pub session: Option<openxr_sys::Session>,
+    pub instance: Option<xr::Instance>,
+    pub session: Option<xr::Session<xr::OpenGlEs>>,
 
     pub get_instance_proc_addr: Option<pfn::GetInstanceProcAddr>,
     pub enumerate_instance_extensions_properties: Option<pfn::EnumerateInstanceExtensionProperties>,
@@ -59,14 +55,14 @@ pub struct OpenXRLayer {
     pub gles_config: *mut c_void,
     pub gles_context: *mut c_void,
 
-    debug_window_swapchain: Option<Swapchain>,
-    view_reference_space: Option<Space>,
+    debug_window_swapchain: Option<xr::Swapchain<xr::OpenGlEs>>,
+    view_reference_space: Option<xr::Space>,
 
-    possible_spaces: HashMap<(Action, Path), Space>,
+    possible_spaces: HashMap<(xr::Action<xr::Posef>, xr::Path), xr::Space>,
 
-    eye_gaze_action: Option<Action>,
-    l_eye_gaze_space: Option<Space>,
-    r_eye_gaze_space: Option<Space>,
+    eye_gaze_action: Option<xr::Action<xr::Posef>>,
+    l_eye_gaze_space: Option<xr::Space>,
+    r_eye_gaze_space: Option<xr::Space>,
 
     start_time: SystemTime,
     // server: OSCServer,
@@ -111,67 +107,40 @@ impl OpenXRLayer {
     }
 
     fn on_session_created(&mut self) {
-        let session = self.session.unwrap();
+        let session = self.session.as_ref().unwrap();
 
-        let swapchain_create_info = SwapchainCreateInfo {
-            ty: openxr_sys::StructureType::SWAPCHAIN_CREATE_INFO,
-            next: ptr::null_mut(),
-
-            create_flags: SwapchainCreateFlags::EMPTY,
-            // TODO: Set the proper flags, those are copied from Steam Link.
-            usage_flags: SwapchainUsageFlags::COLOR_ATTACHMENT | SwapchainUsageFlags::SAMPLED,
-            format: 35907, // OpenGL ES 3 GL_SRGB8_ALPHA8
-            sample_count: 1,
-            width: 1344,
-            height: 1344,
-            face_count: 1,
-            array_size: 1,
-            mip_count: 1,
-        };
-
-        let mut swapchain = Swapchain::NULL;
-
-        unsafe {
-            let result = self.create_swapchain(session, &swapchain_create_info, &mut swapchain);
-            assert_eq!(
-                result,
-                openxr_sys::Result::SUCCESS,
-                "failed to create swapchain"
-            );
-        };
-
-        self.debug_window_swapchain = Some(swapchain);
-
-        let reference_space_create_info = ReferenceSpaceCreateInfo {
-            ty: openxr_sys::StructureType::REFERENCE_SPACE_CREATE_INFO,
-            next: ptr::null(),
-            reference_space_type: ReferenceSpaceType::VIEW,
-            pose_in_reference_space: Posef::IDENTITY,
-        };
-
-        let mut view_reference_space = Space::NULL;
-        assert_eq!(
-            unsafe {
-                self.create_reference_space.unwrap()(
-                    session,
-                    &reference_space_create_info,
-                    &mut view_reference_space,
-                )
-            },
-            openxr_sys::Result::SUCCESS
+        self.debug_window_swapchain = Some(
+            session
+                .create_swapchain(&xr::SwapchainCreateInfo {
+                    create_flags: SwapchainCreateFlags::EMPTY,
+                    // TODO: Set the proper flags, those are copied from Steam Link.
+                    usage_flags: SwapchainUsageFlags::COLOR_ATTACHMENT
+                        | SwapchainUsageFlags::SAMPLED,
+                    format: 35907, // OpenGL ES 3 GL_SRGB8_ALPHA8
+                    sample_count: 1,
+                    width: 1344,
+                    height: 1344,
+                    face_count: 1,
+                    array_size: 1,
+                    mip_count: 1,
+                })
+                .expect("failed to create swapchain"),
         );
-        self.view_reference_space = Some(view_reference_space);
+
+        self.view_reference_space = Some(
+            session
+                .create_reference_space(xr::ReferenceSpaceType::VIEW, xr::Posef::IDENTITY)
+                .expect("failed to create view reference space"),
+        );
     }
 
     pub unsafe fn create_session(
         &mut self,
-        instance: Instance,
+        instance: xr_sys::Instance,
         create_info: *const SessionCreateInfo,
-        session: *mut Session,
+        session: *mut xr_sys::Session,
     ) -> openxr_sys::Result {
         unsafe {
-            self.instance = Some(instance);
-
             let create_info = &*create_info;
             let next = &*(create_info.next as *const BaseInStructure);
 
@@ -196,7 +165,14 @@ impl OpenXRLayer {
                 return result;
             }
 
-            self.session = Some(*session);
+            // instance.create_session(system, info)
+
+            let (session, _, _) = xr::Session::<xr::OpenGlEs>::from_raw(
+                self.instance.as_ref().unwrap().clone(),
+                *session,
+                Box::new(()),
+            );
+            self.session = Some(session);
 
             self.on_session_created();
 
@@ -234,9 +210,9 @@ impl OpenXRLayer {
 
     pub unsafe fn create_swapchain(
         &self,
-        session: Session,
+        session: xr_sys::Session,
         create_info: *const SwapchainCreateInfo,
-        swapchain: *mut Swapchain,
+        swapchain: *mut xr_sys::Swapchain,
     ) -> openxr_sys::Result {
         unsafe {
             println!("create_info: {:?}", *create_info);
@@ -251,7 +227,7 @@ impl OpenXRLayer {
 
     pub unsafe fn end_frame(
         &self,
-        session: Session,
+        session: xr_sys::Session,
         frame_end_info: *const FrameEndInfo,
     ) -> openxr_sys::Result {
         // Create our copy of FrameEndInfo.
@@ -271,7 +247,7 @@ impl OpenXRLayer {
             next: ptr::null(),
             eye_visibility: EyeVisibility::BOTH,
             layer_flags: CompositionLayerFlags::EMPTY,
-            space: self.view_reference_space.unwrap(),
+            space: self.view_reference_space.as_ref().unwrap().as_raw(),
             pose: Posef {
                 position: Vector3f {
                     x: 0.0,
@@ -290,7 +266,7 @@ impl OpenXRLayer {
                 height: 0.1,
             },
             sub_image: SwapchainSubImage {
-                swapchain: self.debug_window_swapchain.unwrap(),
+                swapchain: self.debug_window_swapchain.as_ref().unwrap().as_raw(),
                 image_rect: Rect2Di {
                     extent: Extent2Di {
                         width: 1280,
@@ -654,24 +630,4 @@ impl OpenXRLayer {
         Result::SUCCESS
     }
     */
-
-    pub unsafe fn path_to_string(&self, path: Path) -> String {
-        unsafe {
-            let mut buffer = [0u8; 128];
-            let mut out_size = 0u32;
-            self.path_to_string.unwrap()(
-                self.instance.unwrap(),
-                path,
-                buffer.len().try_into().unwrap(),
-                &mut out_size as *mut u32,
-                buffer.as_mut_ptr() as *mut u8,
-            );
-
-            CStr::from_bytes_until_nul(&buffer[..out_size as usize])
-                .unwrap()
-                .to_str()
-                .unwrap()
-                .to_string()
-        }
-    }
 }
