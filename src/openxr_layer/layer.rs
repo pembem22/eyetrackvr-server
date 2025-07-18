@@ -3,7 +3,7 @@ use std::{collections::HashMap, ffi::c_void, ptr, time::SystemTime};
 use once_cell::sync::Lazy;
 use openxr_sys::{
     self as xr_sys, BaseInStructure, CompositionLayerBaseHeader, CompositionLayerFlags,
-    CompositionLayerQuad, Extent2Df, Extent2Di, EyeVisibility, FrameEndInfo,
+    CompositionLayerQuad, Extent2Df, Extent2Di, EyeVisibility, FrameBeginInfo, FrameEndInfo,
     GraphicsBindingOpenGLESAndroidKHR, LoaderInitInfoBaseHeaderKHR, Offset2Di, Posef, Quaternionf,
     Rect2Di, SessionCreateInfo, SwapchainCreateFlags, SwapchainCreateInfo, SwapchainSubImage,
     SwapchainUsageFlags, Vector3f, pfn,
@@ -42,6 +42,7 @@ pub struct OpenXRLayer {
     pub locate_space: Option<pfn::LocateSpace>,
     pub locate_views: Option<pfn::LocateViews>,
     pub end_frame: Option<pfn::EndFrame>,
+    pub begin_frame: Option<pfn::BeginFrame>,
 
     pub create_session: Option<pfn::CreateSession>,
     pub initalize_loader_khr: Option<pfn::InitializeLoaderKHR>,
@@ -90,6 +91,7 @@ impl OpenXRLayer {
             initalize_loader_khr: None,
             create_swapchain: None,
             end_frame: None,
+            begin_frame: None,
             create_reference_space: None,
             possible_spaces: HashMap::new(),
             start_time: SystemTime::now(),
@@ -139,7 +141,7 @@ impl OpenXRLayer {
         instance: xr_sys::Instance,
         create_info: *const SessionCreateInfo,
         session: *mut xr_sys::Session,
-    ) -> openxr_sys::Result {
+    ) -> xr_sys::Result {
         unsafe {
             let create_info = &*create_info;
             let next = &*(create_info.next as *const BaseInStructure);
@@ -149,7 +151,7 @@ impl OpenXRLayer {
 
             assert_eq!(
                 next.ty,
-                openxr_sys::StructureType::GRAPHICS_BINDING_OPENGL_ES_ANDROID_KHR
+                xr_sys::StructureType::GRAPHICS_BINDING_OPENGL_ES_ANDROID_KHR
             );
 
             let graphics_binding_open_glesandroid_khr =
@@ -161,7 +163,7 @@ impl OpenXRLayer {
 
             let result = self.create_session.unwrap()(instance, create_info, session);
 
-            if result != openxr_sys::Result::SUCCESS {
+            if result != xr_sys::Result::SUCCESS {
                 return result;
             }
 
@@ -176,19 +178,19 @@ impl OpenXRLayer {
 
             self.on_session_created();
 
-            openxr_sys::Result::SUCCESS
+            xr_sys::Result::SUCCESS
         }
     }
 
     pub unsafe fn initalize_loader_khr(
         &mut self,
         loader_init_info: *const LoaderInitInfoBaseHeaderKHR,
-    ) -> openxr_sys::Result {
+    ) -> xr_sys::Result {
         unsafe {
             // OpenXR is only for Android so far.
             assert_eq!(
                 (*loader_init_info).ty,
-                openxr_sys::StructureType::LOADER_INIT_INFO_ANDROID_KHR
+                xr_sys::StructureType::LOADER_INIT_INFO_ANDROID_KHR
             );
 
             let loader_init_info_android = &*(loader_init_info as *const LoaderInitInfoAndroidKHR);
@@ -204,7 +206,7 @@ impl OpenXRLayer {
             // xrNegotiateLoaderApiLayerInterface has been called on the runtime or layer respectively.
             //
             // Means we cannot call the next xrInitializeLoaderKHR function here to return the result.
-            openxr_sys::Result::SUCCESS
+            xr_sys::Result::SUCCESS
         }
     }
 
@@ -213,7 +215,7 @@ impl OpenXRLayer {
         session: xr_sys::Session,
         create_info: *const SwapchainCreateInfo,
         swapchain: *mut xr_sys::Swapchain,
-    ) -> openxr_sys::Result {
+    ) -> xr_sys::Result {
         unsafe {
             println!("create_info: {:?}", *create_info);
 
@@ -229,7 +231,7 @@ impl OpenXRLayer {
         &self,
         session: xr_sys::Session,
         frame_end_info: *const FrameEndInfo,
-    ) -> openxr_sys::Result {
+    ) -> xr_sys::Result {
         // Create our copy of FrameEndInfo.
         let mut frame_end_info = unsafe { *frame_end_info };
 
@@ -242,8 +244,16 @@ impl OpenXRLayer {
         layers.reserve_exact(original_layer_count + 1);
         layers.extend_from_slice(original_layers);
 
+        use quaternion_core as quat;
+        let d = self.start_time.elapsed().unwrap().as_secs_f32();
+        let q = quat::from_euler_angles(
+            quat::RotationType::Extrinsic,
+            quat::RotationSequence::XYZ,
+            [d.sin(), (d * 0.75).cos(), (d * 0.25).sin()],
+        );
+
         let my_layer = CompositionLayerQuad {
-            ty: openxr_sys::StructureType::COMPOSITION_LAYER_QUAD,
+            ty: xr_sys::StructureType::COMPOSITION_LAYER_QUAD,
             next: ptr::null(),
             eye_visibility: EyeVisibility::BOTH,
             layer_flags: CompositionLayerFlags::EMPTY,
@@ -251,19 +261,19 @@ impl OpenXRLayer {
             pose: Posef {
                 position: Vector3f {
                     x: 0.0,
-                    y: 0.0,
-                    z: -1.0,
+                    y: -0.10,
+                    z: -0.25,
                 },
                 orientation: Quaternionf {
-                    x: -0.002,
-                    y: -0.670,
-                    z: 0.223,
-                    w: 0.708,
+                    w: q.0,
+                    x: q.1[0],
+                    y: q.1[1],
+                    z: q.1[2],
                 },
             },
             size: Extent2Df {
-                width: 0.1,
-                height: 0.1,
+                width: 0.16,
+                height: 0.09,
             },
             sub_image: SwapchainSubImage {
                 swapchain: self.debug_window_swapchain.as_ref().unwrap().as_raw(),
@@ -287,10 +297,23 @@ impl OpenXRLayer {
 
         assert_eq!(
             unsafe { self.end_frame.unwrap()(session, &frame_end_info) },
-            openxr_sys::Result::SUCCESS
+            xr_sys::Result::SUCCESS
         );
 
-        openxr_sys::Result::SUCCESS
+        xr_sys::Result::SUCCESS
+    }
+
+    pub unsafe fn begin_frame(
+        &mut self,
+        session: xr_sys::Session,
+        frame_begin_info: *const FrameBeginInfo,
+    ) -> xr_sys::Result {
+        let swapchain = self.debug_window_swapchain.as_mut().unwrap();
+        let _ = swapchain.acquire_image().unwrap();
+        swapchain.wait_image(xr::Duration::from_nanos(100)).unwrap();
+        swapchain.release_image().unwrap();
+
+        unsafe { self.begin_frame.unwrap()(session, frame_begin_info) }
     }
 
     /*

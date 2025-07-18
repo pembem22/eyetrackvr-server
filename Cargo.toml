@@ -33,6 +33,7 @@ openxr-sys = { version = "0.11.0", optional = true }
 ort = { version = "=2.0.0-rc.10", optional = true }
 ort-sys = { version = "=2.0.0-rc.10", default-features = false, optional = true }
 pollster = "0.4.0"
+quaternion-core = "0.5.4"
 rosc = "0.11.4"
 serde_json = "1.0.116"
 tokio = { version = "1.35.1", features = ["full"] }

@@ -8,6 +8,7 @@ use crate::openxr_layer::layer::LAYER;
 
 use openxr::{self as xr};
 
+use openxr_sys::FrameBeginInfo;
 use openxr_sys::FrameEndInfo;
 use openxr_sys::LoaderInitInfoBaseHeaderKHR;
 use openxr_sys::Session;
@@ -224,6 +225,15 @@ pub unsafe extern "system" fn xr_get_instance_proc_addr(
             );
         }
 
+        if api_name == "xrBeginFrame" {
+            layer.begin_frame = Some(std::mem::transmute::<pfn::VoidFunction, pfn::BeginFrame>(
+                (*function).unwrap(),
+            ));
+            *function = Some(std::mem::transmute::<pfn::BeginFrame, pfn::VoidFunction>(
+                xr_begin_frame,
+            ));
+        }
+
         if api_name == "xrEndFrame" {
             layer.end_frame = Some(std::mem::transmute::<pfn::VoidFunction, pfn::EndFrame>(
                 (*function).unwrap(),
@@ -264,6 +274,13 @@ unsafe extern "system" fn xr_create_swapchain(
     swapchain: *mut Swapchain,
 ) -> Result {
     unsafe { LAYER.create_swapchain(session, create_info, swapchain) }
+}
+
+unsafe extern "system" fn xr_begin_frame(
+    session: Session,
+    frame_begin_info: *const FrameBeginInfo,
+) -> Result {
+    unsafe { LAYER.begin_frame(session, frame_begin_info) }
 }
 
 unsafe extern "system" fn xr_end_frame(

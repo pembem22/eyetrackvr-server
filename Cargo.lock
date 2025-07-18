@@ -1033,6 +1033,7 @@ dependencies = [
  "ort",
  "ort-sys",
  "pollster",
+ "quaternion-core",
  "rosc",
  "serde_json",
  "tokio",
@@ -2909,6 +2910,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f6d64c71eb498fe9eae14ce4ec935c555749aef511cca85b5568910d6e48001"
 dependencies = [
  "bytemuck",
+]
+
+[[package]]
+name = "quaternion-core"
+version = "0.5.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3647e97129bc3d8dc4a4ee1251c9799cf83766452875ccedaf90f45a0d5a3923"
+dependencies = [
+ "num-traits",
 ]
 
 [[package]]
