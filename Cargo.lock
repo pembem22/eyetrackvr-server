@@ -1015,6 +1015,7 @@ dependencies = [
  "const_format",
  "env_logger",
  "futures",
+ "glow",
  "hex-literal",
  "hyper",
  "image",

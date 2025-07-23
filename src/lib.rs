@@ -8,8 +8,10 @@ mod structs;
 mod camera_texture;
 #[cfg(feature = "gui")]
 mod ui;
-#[cfg(feature = "gui")]
-mod window;
+#[cfg(all(feature = "gui", platform = "windows"))]
+mod window_desktop;
+
+mod window_android;
 
 #[cfg(feature = "inference")]
 mod data_processing;

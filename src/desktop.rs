@@ -1,4 +1,3 @@
-// use crate::camera_server::start_camera_server;
 use crate::frame_server::start_frame_server;
 
 #[cfg(feature = "inference")]
@@ -9,7 +8,7 @@ use crate::inference::eye_inference;
 use crate::osc_sender::start_osc_sender;
 
 #[cfg(feature = "gui")]
-use crate::window::start_ui;
+use crate::window_desktop::start_ui;
 
 use clap::Parser;
 use futures::future::try_join_all;

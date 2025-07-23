@@ -2,8 +2,6 @@ use std::time::{Duration, SystemTime};
 
 use async_broadcast::Receiver;
 use image::DynamicImage;
-use imgui::TextureId;
-use imgui_wgpu::{Texture, TextureConfig};
 
 use crate::camera::{CAMERA_FRAME_SIZE, Frame};
 
@@ -24,7 +22,7 @@ impl CameraTexture {
         renderer: &mut imgui_wgpu::Renderer,
         label: Option<&str>,
     ) -> CameraTexture {
-        let texture_config: TextureConfig<'_> = TextureConfig {
+        let texture_config= imgui_wgpu::TextureConfig {
             size: wgpu::Extent3d {
                 width: CAMERA_FRAME_SIZE,
                 height: CAMERA_FRAME_SIZE,
@@ -35,7 +33,7 @@ impl CameraTexture {
             ..Default::default()
         };
 
-        let texture = Texture::new(device, renderer, texture_config);
+        let texture = imgui_wgpu::Texture::new(device, renderer, texture_config);
 
         CameraTexture {
             last_delta: Duration::ZERO,
@@ -61,14 +59,6 @@ impl CameraTexture {
 
         let image = DynamicImage::from(frame.decoded.clone()).into_rgba8();
 
-        // let expand_range = |v: u8| {
-        //     println!("{}", v);
-        //     (((v - 15) as u32) * 255 / (235 - 15 + 1)) as u8
-        // };
-        // image.pixels_mut().for_each(|p| {
-        //     p.0[0..3].iter_mut().for_each(|p| {*p = expand_range(*p)});
-        // });
-
         renderer.textures.get(self.texture_id).unwrap().write(
             queue,
             &image,
@@ -93,7 +83,7 @@ impl CameraTexture {
         .build(ui);
     }
 
-    pub fn get_texture_id(self) -> TextureId {
+    pub fn get_texture_id(self) -> imgui::TextureId {
         self.texture_id
     }
 

@@ -1,11 +1,12 @@
-use crate::camera::{CAMERA_FRAME_SIZE, Frame};
+use crate::camera::Frame;
 use crate::camera_texture::CameraTexture;
+
+#[cfg(feature = "inference")]
 use crate::inference::{
     FRAME_CROP_H, FRAME_CROP_W, FRAME_CROP_X, FRAME_CROP_Y, FRAME_RESIZE_H, FRAME_RESIZE_W,
 };
 use crate::structs::EyeState;
 use async_broadcast::Receiver;
-use imgui::ImColor32;
 
 pub struct AppRendererContext {
     pub l_rx: Receiver<Frame>,
@@ -91,6 +92,15 @@ impl AppRenderer {
             ui.text(format!("Face, FPS: {f_fps:03}"));
             group.end();
         });
+
+        #[cfg(feature = "inference")]
+        self.draw_inference_window(&ui);
+    }
+
+    #[cfg(feature = "inference")]
+    fn draw_inference_window(&self, ui: &imgui::Ui) {
+        use imgui::ImColor32;
+        use crate::camera::CAMERA_FRAME_SIZE;
 
         ui.window("Inference").build(move || {
             // Cropped Camera Feeds

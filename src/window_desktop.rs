@@ -4,7 +4,12 @@ use imgui_winit_support::WinitPlatform;
 use pollster::block_on;
 use std::{sync::Arc, time::Instant};
 use winit::{
-    application::ApplicationHandler, dpi::LogicalSize, event::{Event, WindowEvent}, event_loop::{ActiveEventLoop, ControlFlow, EventLoop}, platform::windows::EventLoopBuilderExtWindows, window::Window
+    application::ApplicationHandler,
+    dpi::LogicalSize,
+    event::{Event, WindowEvent},
+    event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
+    platform::windows::EventLoopBuilderExtWindows,
+    window::Window,
 };
 
 use crate::ui::{AppRenderer, AppRendererContext};
@@ -35,6 +40,19 @@ pub(crate) struct AppWindow {
 
     renderer: Option<AppRenderer>,
     renderer_context: AppRendererContext,
+}
+
+impl AppWindow {
+    pub(crate) fn new(renderer_context: AppRendererContext) -> Self {
+        AppWindow {
+            window: None,
+
+            paused: false,
+
+            renderer: None,
+            renderer_context,
+        }
+    }
 }
 
 impl AppWindow {
@@ -339,7 +357,7 @@ impl ApplicationHandler for AppWindow {
     }
 }
 
-pub fn start_ui(renderer_context: AppRendererContext) -> tokio::task::JoinHandle<()>{
+pub fn start_ui(renderer_context: AppRendererContext) -> tokio::task::JoinHandle<()> {
     tokio::task::spawn_blocking(|| {
         let event_loop = EventLoop::builder().with_any_thread(true).build().unwrap();
         event_loop.set_control_flow(ControlFlow::Poll);

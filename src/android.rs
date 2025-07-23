@@ -81,6 +81,8 @@ use tokio::task::JoinHandle;
 
 use crate::{app::App, camera_server::start_camera_server};
 
+use crate::window_android::start_ui;
+
 pub fn main() {
     println!("Hello from Android main!");
     std::thread::spawn(|| {
@@ -114,6 +116,8 @@ fn start_android_tasks(app: &App) -> Vec<JoinHandle<()>> {
         app.r_cam_rx.clone(),
         app.f_cam_rx.clone(),
     ));
+
+    tasks.push(start_ui(&app));
 
     tasks
 }

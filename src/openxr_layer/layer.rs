@@ -1,4 +1,10 @@
-use std::{collections::HashMap, ffi::c_void, ptr, time::SystemTime};
+use std::{
+    collections::HashMap,
+    ffi::c_void,
+    ptr,
+    sync::{Condvar, Mutex},
+    time::SystemTime,
+};
 
 use once_cell::sync::Lazy;
 use openxr_sys::{
@@ -28,6 +34,30 @@ const ADVERTISED_EXTENSIONS: &[Extension] = &[Extension {
     version: 1,
 }];
 
+#[derive(Default, Debug)]
+pub struct RenderSignal {
+    pub ready: bool,
+    pub mutex: Mutex<bool>,
+    pub condvar: Condvar,
+}
+
+#[derive(Default, Debug)]
+pub struct EGLPointers {
+    pub display: *mut c_void, // EGLDisplay
+    pub config: *mut c_void,  // EGLConfig
+    pub context: *mut c_void, // EGLContext
+}
+
+#[link(name = "EGL")]
+unsafe extern "C" {
+    unsafe fn eglMakeCurrent(
+        display: *mut c_void,
+        draw: *mut c_void,
+        read: *mut c_void,
+        context: *mut c_void,
+    ) -> u8;
+}
+
 pub struct OpenXRLayer {
     pub instance: Option<xr::Instance>,
     pub session: Option<xr::Session<xr::OpenGlEs>>,
@@ -52,9 +82,11 @@ pub struct OpenXRLayer {
     pub application_vm: *mut c_void,
     pub application_context: *mut c_void,
 
-    pub gles_display: *mut c_void,
-    pub gles_config: *mut c_void,
-    pub gles_context: *mut c_void,
+    pub egl_pointers: Option<EGLPointers>,
+    pub egl_image: u32,
+    swapchain_images: Vec<u32>,
+
+    pub render_signal: RenderSignal,
 
     debug_window_swapchain: Option<xr::Swapchain<xr::OpenGlEs>>,
     view_reference_space: Option<xr::Space>,
@@ -99,9 +131,11 @@ impl OpenXRLayer {
             application_context: ptr::null_mut(),
             application_vm: ptr::null_mut(),
 
-            gles_display: ptr::null_mut(),
-            gles_config: ptr::null_mut(),
-            gles_context: ptr::null_mut(),
+            egl_pointers: None,
+            egl_image: Default::default(),
+            swapchain_images: Default::default(),
+
+            render_signal: Default::default(),
 
             debug_window_swapchain: None,
             view_reference_space: None,
@@ -110,24 +144,22 @@ impl OpenXRLayer {
 
     fn on_session_created(&mut self) {
         let session = self.session.as_ref().unwrap();
-
-        self.debug_window_swapchain = Some(
-            session
-                .create_swapchain(&xr::SwapchainCreateInfo {
-                    create_flags: SwapchainCreateFlags::EMPTY,
-                    // TODO: Set the proper flags, those are copied from Steam Link.
-                    usage_flags: SwapchainUsageFlags::COLOR_ATTACHMENT
-                        | SwapchainUsageFlags::SAMPLED,
-                    format: 35907, // OpenGL ES 3 GL_SRGB8_ALPHA8
-                    sample_count: 1,
-                    width: 1344,
-                    height: 1344,
-                    face_count: 1,
-                    array_size: 1,
-                    mip_count: 1,
-                })
-                .expect("failed to create swapchain"),
-        );
+        let swapchain = session
+            .create_swapchain(&xr::SwapchainCreateInfo {
+                create_flags: SwapchainCreateFlags::EMPTY,
+                // TODO: Set the proper flags, those are copied from Steam Link.
+                usage_flags: SwapchainUsageFlags::COLOR_ATTACHMENT | SwapchainUsageFlags::SAMPLED,
+                format: 35907, // OpenGL ES 3 GL_SRGB8_ALPHA8
+                sample_count: 1,
+                width: 1344,
+                height: 1344,
+                face_count: 1,
+                array_size: 1,
+                mip_count: 1,
+            })
+            .expect("failed to create swapchain");
+        self.swapchain_images = swapchain.enumerate_images().unwrap();
+        self.debug_window_swapchain = Some(swapchain);
 
         self.view_reference_space = Some(
             session
@@ -160,6 +192,12 @@ impl OpenXRLayer {
             println!(
                 "graphics_binding_open_glesandroid_khr {graphics_binding_open_glesandroid_khr:?}"
             );
+
+            self.egl_pointers = Some(EGLPointers {
+                config: graphics_binding_open_glesandroid_khr.config,
+                context: graphics_binding_open_glesandroid_khr.context,
+                display: graphics_binding_open_glesandroid_khr.display,
+            });
 
             let result = self.create_session.unwrap()(instance, create_info, session);
 
@@ -219,6 +257,16 @@ impl OpenXRLayer {
         unsafe {
             println!("create_info: {:?}", *create_info);
 
+            let next = (*create_info).next;
+            if !next.is_null() {
+                let next = next as *const BaseInStructure;
+                println!("{next:?}");
+                if (*next).ty == xr_sys::StructureType::ANDROID_SURFACE_SWAPCHAIN_CREATE_INFO_FB {
+                    let next = next as *const xr_sys::AndroidSurfaceSwapchainCreateInfoFB;
+                    println!("{next:?}");
+                }
+            }
+
             let result = self.create_swapchain.unwrap()(session, create_info, swapchain);
 
             println!("swapchain: {:?}", *swapchain);
@@ -228,10 +276,60 @@ impl OpenXRLayer {
     }
 
     pub unsafe fn end_frame(
-        &self,
+        &mut self,
         session: xr_sys::Session,
         frame_end_info: *const FrameEndInfo,
     ) -> xr_sys::Result {
+        let egl_pointers = self.egl_pointers.as_mut().unwrap();
+
+        let swapchain = self.debug_window_swapchain.as_mut().unwrap();
+        let image_index = swapchain.acquire_image().unwrap();
+        swapchain
+            .wait_image(xr::Duration::from_nanos(1000))
+            .unwrap();
+
+        self.egl_image = self.swapchain_images[image_index as usize];
+        println!("image_index {image_index} {}", self.egl_image);
+
+        // (Steam Link) Unbind the context from the thread, assuming it's here.
+        unsafe {
+            eglMakeCurrent(
+                egl_pointers.display,
+                ptr::null_mut(),
+                ptr::null_mut(),
+                ptr::null_mut(),
+            )
+        };
+
+        // Wake up the render thread.
+        {
+            let mut ready = self.render_signal.mutex.lock().unwrap();
+            *ready = true;
+            self.render_signal.condvar.notify_one();
+        }
+
+        // Render thread does the rendering.
+
+        // Wait for the render thread to finish.
+        {
+            let mut ready = self.render_signal.mutex.lock().unwrap();
+            while *ready {
+                ready = self.render_signal.condvar.wait(ready).unwrap();
+            }
+        }
+
+        // (Steam Link) Bind the context back.
+        unsafe {
+            eglMakeCurrent(
+                egl_pointers.display,
+                ptr::null_mut(),
+                ptr::null_mut(),
+                egl_pointers.context,
+            )
+        };
+
+        swapchain.release_image().unwrap();
+
         // Create our copy of FrameEndInfo.
         let mut frame_end_info = unsafe { *frame_end_info };
 
@@ -245,11 +343,10 @@ impl OpenXRLayer {
         layers.extend_from_slice(original_layers);
 
         use quaternion_core as quat;
-        let d = self.start_time.elapsed().unwrap().as_secs_f32();
         let q = quat::from_euler_angles(
             quat::RotationType::Extrinsic,
             quat::RotationSequence::XYZ,
-            [d.sin(), (d * 0.75).cos(), (d * 0.25).sin()],
+            [0.0, 0.0, 30.0],
         );
 
         let my_layer = CompositionLayerQuad {
@@ -308,11 +405,6 @@ impl OpenXRLayer {
         session: xr_sys::Session,
         frame_begin_info: *const FrameBeginInfo,
     ) -> xr_sys::Result {
-        let swapchain = self.debug_window_swapchain.as_mut().unwrap();
-        let _ = swapchain.acquire_image().unwrap();
-        swapchain.wait_image(xr::Duration::from_nanos(100)).unwrap();
-        swapchain.release_image().unwrap();
-
         unsafe { self.begin_frame.unwrap()(session, frame_begin_info) }
     }
 
