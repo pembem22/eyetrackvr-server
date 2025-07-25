@@ -85,6 +85,7 @@ use crate::window_android::start_ui;
 
 pub fn main() {
     println!("Hello from Android main!");
+
     std::thread::spawn(|| {
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {

@@ -108,6 +108,7 @@ struct RenderContext {
     // adapter: wgpu::hal::ExposedAdapter<Gles>,
     // imgui: Option<ImguiState>,
     gl: glow::Context,
+    framebuffer: glow::Framebuffer,
 }
 
 impl RenderContext {
@@ -153,13 +154,14 @@ impl RenderContext {
         //     // adapter,
         // }
 
-        let gl: glow::Context = unsafe {
+        let gl = unsafe {
             glow::Context::from_loader_function_cstr(|cstr| {
                 eglGetProcAddress(cstr.as_ptr()) as *const _
             })
         };
+        let framebuffer = unsafe { gl.create_framebuffer().unwrap() };
 
-        RenderContext { gl }
+        RenderContext { gl, framebuffer }
     }
 
     // fn setup_imgui(&mut self) {
@@ -247,8 +249,7 @@ pub fn start_ui(app: &App) -> tokio::task::JoinHandle<()> {
             let gl = &mut render_context.gl;
 
             unsafe {
-                let fb = gl.create_framebuffer().unwrap();
-                gl.bind_framebuffer(glow::FRAMEBUFFER, Some(fb));
+                gl.bind_framebuffer(glow::FRAMEBUFFER, Some(render_context.framebuffer));
                 gl.framebuffer_texture_2d(
                     glow::FRAMEBUFFER,
                     glow::COLOR_ATTACHMENT0,
@@ -273,7 +274,6 @@ pub fn start_ui(app: &App) -> tokio::task::JoinHandle<()> {
                 gl.clear(glow::COLOR_BUFFER_BIT);
 
                 gl.bind_framebuffer(glow::FRAMEBUFFER, None);
-                gl.delete_framebuffer(fb);
             }
 
             // render_context.device.texture_from_raw(name, desc, drop_callback)

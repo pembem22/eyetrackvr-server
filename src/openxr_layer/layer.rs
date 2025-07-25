@@ -346,7 +346,7 @@ impl OpenXRLayer {
         let q = quat::from_euler_angles(
             quat::RotationType::Extrinsic,
             quat::RotationSequence::XYZ,
-            [0.0, 0.0, 30.0],
+            [30.0, 0.0, 0.0],
         );
 
         let my_layer = CompositionLayerQuad {
