@@ -244,12 +244,12 @@ pub fn start_ui(app: &App) -> tokio::task::JoinHandle<()> {
                 );
             }
 
-            let render_context =
-                maybe_render_ctx.get_or_insert(unsafe { RenderContext::init_on_current_context() });
-            let gl = &mut render_context.gl;
+            let render_ctx =
+                maybe_render_ctx.get_or_insert_with(|| unsafe { RenderContext::init_on_current_context() });
+            let gl = &mut render_ctx.gl;
 
             unsafe {
-                gl.bind_framebuffer(glow::FRAMEBUFFER, Some(render_context.framebuffer));
+                gl.bind_framebuffer(glow::FRAMEBUFFER, Some(render_ctx.framebuffer));
                 gl.framebuffer_texture_2d(
                     glow::FRAMEBUFFER,
                     glow::COLOR_ATTACHMENT0,
