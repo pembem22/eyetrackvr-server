@@ -84,6 +84,8 @@ use crate::{app::App, camera_server::start_camera_server};
 use crate::window_android::start_ui;
 
 pub fn main() {
+    env_logger::builder().format_timestamp(None).init();
+
     println!("Hello from Android main!");
 
     std::thread::spawn(|| {
@@ -118,7 +120,14 @@ fn start_android_tasks(app: &App) -> Vec<JoinHandle<()>> {
         app.f_cam_rx.clone(),
     ));
 
-    tasks.push(start_ui(&app));
+    tasks.push(start_ui(crate::ui::AppRendererContext {
+        l_rx: app.l_cam_rx.activate_cloned(),
+        r_rx: app.r_cam_rx.activate_cloned(),
+        f_rx: app.f_cam_rx.activate_cloned(),
+        l_raw_rx: app.l_raw_eye_rx.activate_cloned(),
+        r_raw_rx: app.r_raw_eye_rx.activate_cloned(),
+        filtered_eyes_rx: app.filtered_eyes_rx.activate_cloned(),
+    }));
 
     tasks
 }

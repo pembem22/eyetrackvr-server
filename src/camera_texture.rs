@@ -66,7 +66,8 @@ impl CameraTexture {
             CAMERA_FRAME_SIZE,
         );
 
-        self.last_delta = frame.timestamp.duration_since(self.last_timestamp).unwrap();
+        // TODO: why crashes here on Android?
+        self.last_delta = frame.timestamp.duration_since(self.last_timestamp).unwrap_or_default();
         self.last_timestamp = frame.timestamp;
 
         self.update_fps();

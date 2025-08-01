@@ -149,10 +149,10 @@ impl OpenXRLayer {
                 create_flags: SwapchainCreateFlags::EMPTY,
                 // TODO: Set the proper flags, those are copied from Steam Link.
                 usage_flags: SwapchainUsageFlags::COLOR_ATTACHMENT | SwapchainUsageFlags::SAMPLED,
-                format: 35907, // OpenGL ES 3 GL_SRGB8_ALPHA8
+                format: glow::SRGB8_ALPHA8,
                 sample_count: 1,
-                width: 1344,
-                height: 1344,
+                width: 1280,
+                height: 720,
                 face_count: 1,
                 array_size: 1,
                 mip_count: 1,
@@ -284,12 +284,12 @@ impl OpenXRLayer {
 
         let swapchain = self.debug_window_swapchain.as_mut().unwrap();
         let image_index = swapchain.acquire_image().unwrap();
+        // TODO: figure out how to detect a timeout, cause there's no way to know atm.
         swapchain
-            .wait_image(xr::Duration::from_nanos(1000))
+            .wait_image(xr::Duration::from_nanos(100000))
             .unwrap();
 
         self.egl_image = self.swapchain_images[image_index as usize];
-        println!("image_index {image_index} {}", self.egl_image);
 
         // (Steam Link) Unbind the context from the thread, assuming it's here.
         unsafe {
@@ -346,7 +346,7 @@ impl OpenXRLayer {
         let q = quat::from_euler_angles(
             quat::RotationType::Extrinsic,
             quat::RotationSequence::XYZ,
-            [30.0, 0.0, 0.0],
+            [-45f32.to_radians(), 0.0, 0.0],
         );
 
         let my_layer = CompositionLayerQuad {
@@ -359,7 +359,7 @@ impl OpenXRLayer {
                 position: Vector3f {
                     x: 0.0,
                     y: -0.10,
-                    z: -0.25,
+                    z: -0.20,
                 },
                 orientation: Quaternionf {
                     w: q.0,

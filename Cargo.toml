@@ -22,6 +22,8 @@ image = "0.25.6"
 imgui = { version = "0.12.0", optional = true }
 imgui-wgpu = { version = "0.25.0", optional = true }
 jni = { version = "0.21.1", optional = true }
+khronos-egl = "6.0.0"
+log = "0.4.27"
 mime = "0.3.17"
 multipart-stream = "0.1.2"
 ndarray = "0.16.1"
@@ -59,3 +61,5 @@ desktop = [] # Or should I name it "standalone"?
 mio-serial = { git = "https://github.com/pembem22/mio-serial.git", branch = "fix-stop-bits" }
 # https://github.com/Yatekii/imgui-wgpu-rs/pull/124
 imgui-wgpu = { git = "https://github.com/Yatekii/imgui-wgpu-rs", rev = "7408a75" }
+# This patch removes all EGL context switching from inside of wgpu-hal.
+wgpu = { git = "https://github.com/pembem22/wgpu", branch = "v25.0.2-egl-manual-context" }

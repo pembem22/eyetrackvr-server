@@ -1,93 +1,76 @@
 use core::ffi::c_void;
 use std::{
-    ffi::{CString, c_char},
-    num::NonZeroU32,
+    ffi::c_char,
     ptr,
-    time::{Instant, SystemTime},
+    time::Instant,
 };
 
-// use imgui::FontSource;
-// use imgui::MouseCursor;
-// use imgui_wgpu::Renderer;
-
-// use wgpu::{GlBackendOptions, GlFenceBehavior, Gles3MinorVersion};
-
-use glow::{HasContext, NativeTexture};
+use glow::HasContext;
 use pollster::block_on;
-// use wgpu::{
-//     FeaturesWGPU,
-//     hal::Adapter,
-//     wgc::{api::Gles, hal_api::HalApi},
-// };
 
 use crate::{
-    app::App,
-    openxr_layer::layer::{self, LAYER},
-    // ui::{AppRenderer, AppRendererContext},
+    openxr_layer::layer::{EGLPointers, LAYER},
+    ui::{AppRenderer, AppRendererContext},
 };
 
-// struct ImguiState {
-//     context: imgui::Context,
-//     // platform: WinitPlatform,
-//     renderer: imgui_wgpu::Renderer,
-//     clear_color: wgpu::Color,
-//     last_frame: Instant,
-//     last_cursor: Option<imgui::MouseCursor>,
-// }
+struct ImguiState {
+    context: imgui::Context,
+    renderer: imgui_wgpu::Renderer,
+    clear_color: wgpu::Color,
+    last_frame: Instant,
+    last_cursor: Option<imgui::MouseCursor>,
+}
 
-// impl ImguiState {
-//     fn setup_imgui(&mut self) -> Self {
-//         let mut context = imgui::Context::create();
-//         let mut platform = imgui_winit_support::WinitPlatform::new(&mut context);
-//         platform.attach_window(
-//             context.io_mut(),
-//             &self.window,
-//             imgui_winit_support::HiDpiMode::Default,
-//         );
-//         context.set_ini_filename(None);
+impl ImguiState {
+    fn setup_imgui(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
+        let mut context = imgui::Context::create();
+        context.set_ini_filename(None);
 
-//         let font_size = (13.0 * self.hidpi_factor) as f32;
-//         context.io_mut().font_global_scale = (1.0 / self.hidpi_factor) as f32;
+        let hidpi_factor = 1.0;
+        let font_size = (13.0 * hidpi_factor) as f32;
+        context.io_mut().font_global_scale = (1.0 / hidpi_factor) as f32;
+        context.io_mut().display_framebuffer_scale = [hidpi_factor, hidpi_factor];
+        context.io_mut().display_size = [1280.0, 720.0];
 
-//         context.fonts().add_font(&[FontSource::DefaultFontData {
-//             config: Some(imgui::FontConfig {
-//                 oversample_h: 1,
-//                 pixel_snap_h: true,
-//                 size_pixels: font_size,
-//                 ..Default::default()
-//             }),
-//         }]);
+        context
+            .fonts()
+            .add_font(&[imgui::FontSource::DefaultFontData {
+                config: Some(imgui::FontConfig {
+                    oversample_h: 1,
+                    pixel_snap_h: true,
+                    size_pixels: font_size,
+                    ..Default::default()
+                }),
+            }]);
 
-//         //
-//         // Set up dear imgui wgpu renderer
-//         //
-//         let clear_color = wgpu::Color {
-//             r: 0.1,
-//             g: 0.2,
-//             b: 0.3,
-//             a: 1.0,
-//         };
+        //
+        // Set up dear imgui wgpu renderer
+        //
+        let clear_color = wgpu::Color {
+            r: 0.1,
+            g: 0.2,
+            b: 0.3,
+            a: 1.0,
+        };
 
-//         let renderer_config = RendererConfig {
-//             texture_format: self.surface_desc.format,
-//             ..Default::default()
-//         };
+        let renderer_config = imgui_wgpu::RendererConfig {
+            texture_format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            ..Default::default()
+        };
 
-//         let renderer =
-//             imgui_wgpu::Renderer::new(&mut context, &self.device, &self.queue, renderer_config);
-//         let last_frame = Instant::now();
-//         let last_cursor = None;
+        let renderer = imgui_wgpu::Renderer::new(&mut context, &device, &queue, renderer_config);
+        let last_frame = Instant::now();
+        let last_cursor = None;
 
-//         Self {
-//             context,
-//             // platform,
-//             renderer,
-//             clear_color,
-//             last_frame,
-//             last_cursor,
-//         }
-//     }
-// }
+        Self {
+            context,
+            renderer,
+            clear_color,
+            last_frame,
+            last_cursor,
+        }
+    }
+}
 
 #[link(name = "EGL")]
 unsafe extern "C" {
@@ -97,124 +80,156 @@ unsafe extern "C" {
         read: *mut c_void,
         context: *mut c_void,
     ) -> u8;
+    unsafe fn eglGetCurrentContext() -> *const c_void;
     unsafe fn eglGetProcAddress(name: *const c_char) -> *const c_void;
 }
 
 struct RenderContext {
-    // device: wgpu::Device,
-    // queue: wgpu::Queue,
-    // texture: wgpu::hal::gles::Texture,
-    // surface: wgpu::hal::gles::Surface, // or custom FBO target if rendering into OpenXR swapchain
-    // adapter: wgpu::hal::ExposedAdapter<Gles>,
-    // imgui: Option<ImguiState>,
+    device: wgpu::Device,
+    queue: wgpu::Queue,
+
+    texture: wgpu::Texture,
+    texture_view: wgpu::TextureView,
+
     gl: glow::Context,
-    framebuffer: glow::Framebuffer,
+    openxr_fb: glow::Framebuffer,
+    imgui_fb: glow::Framebuffer,
+
+    imgui: ImguiState,
+
+    renderer: AppRenderer,
+    renderer_ctx: AppRendererContext,
 }
 
 impl RenderContext {
-    unsafe fn init_on_current_context() -> RenderContext {
-        // use wgpu::{GlBackendOptions, GlFenceBehavior, Gles3MinorVersion};
-
-        // let mut get_proc = |name: &str| {
-        //     let cname = std::ffi::CString::new(name).unwrap();
-        //     unsafe { eglGetProcAddress(cname.as_ptr()) as *const _ }
-        // };
-
-        // let options = GlBackendOptions {
-        //     gles_minor_version: Gles3MinorVersion::Automatic,
-        //     fence_behavior: GlFenceBehavior::Normal,
-        // };
-
-        // let adapter =
-        //     unsafe { wgpu::hal::gles::Adapter::new_external(&mut get_proc, options).unwrap() };
-
-        // let (device, queue) = unsafe {
-        //     adapter.
-        // }?;
-
-        // let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-        //     backends: wgpu::Backends::GL,
-        //     ..Default::default()
-        // });
-
-        // let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-        //     power_preference: wgpu::PowerPreference::HighPerformance,
-        //     compatible_surface: None,
-        //     force_fallback_adapter: false,
-        // }))
-        // .unwrap();
-
-        // let (device, queue) =
-        //     block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).unwrap();
-
-        // RenderContext {
-        //     device,
-        //     queue,
-        //     // surface: /* optional or None if you're rendering directly to OpenXR FBO */,
-        //     // adapter,
-        // }
-
+    #![warn(static_mut_refs)]
+    unsafe fn init_on_current_context(
+        renderer_ctx: AppRendererContext,
+        egl_pointers: &EGLPointers,
+    ) -> RenderContext {
         let gl = unsafe {
             glow::Context::from_loader_function_cstr(|cstr| {
                 eglGetProcAddress(cstr.as_ptr()) as *const _
             })
         };
-        let framebuffer = unsafe { gl.create_framebuffer().unwrap() };
+        let openxr_fb = unsafe { gl.create_framebuffer().unwrap() };
+        let imgui_fb = unsafe { gl.create_framebuffer().unwrap() };
 
-        RenderContext { gl, framebuffer }
+        unsafe {
+            wgpu::hal::gles::EGL_CONTEXT
+                .insert(khronos_egl::Context::from_ptr(egl_pointers.context))
+        };
+        unsafe {
+            wgpu::hal::gles::EGL_DISPLAY
+                .insert(khronos_egl::Display::from_ptr(egl_pointers.display))
+        };
+
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::GL,
+            flags: wgpu::InstanceFlags::advanced_debugging(),
+            ..Default::default()
+        });
+
+        let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::HighPerformance,
+            compatible_surface: None,
+            force_fallback_adapter: false,
+        }))
+        .unwrap();
+
+        let (mut device, queue) =
+            block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).unwrap();
+
+        let texture = device.create_texture(&wgpu::wgt::TextureDescriptor {
+            label: Some("imgui texture"),
+            size: wgpu::Extent3d {
+                width: 1280,
+                height: 720,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[wgpu::TextureFormat::Rgba8UnormSrgb],
+        });
+        let texture_view = texture.create_view(&Default::default());
+
+        let mut imgui: ImguiState = ImguiState::setup_imgui(&device, &queue);
+
+        let renderer = AppRenderer::new(&mut device, &mut imgui.renderer);
+
+        RenderContext {
+            device,
+            queue,
+            texture,
+            texture_view,
+            gl,
+            openxr_fb,
+            imgui_fb,
+            imgui,
+            renderer,
+            renderer_ctx,
+        }
     }
 
-    // fn setup_imgui(&mut self) {
-    //     let mut context = imgui::Context::create();
-    //     context.set_ini_filename(None);
+    fn render(&mut self) {
+        let imgui = &mut self.imgui;
 
-    //     let hidpi_factor = 96.0;
+        let now = Instant::now();
+        imgui
+            .context
+            .io_mut()
+            .update_delta_time(now - imgui.last_frame);
+        imgui.last_frame = now;
 
-    //     let font_size = (13.0 * hidpi_factor) as f32;
-    //     context.io_mut().font_global_scale = (1.0 / hidpi_factor) as f32;
+        let ui = imgui.context.frame();
 
-    //     context.fonts().add_font(&[FontSource::DefaultFontData {
-    //         config: Some(imgui::FontConfig {
-    //             oversample_h: 1,
-    //             pixel_snap_h: true,
-    //             size_pixels: font_size,
-    //             ..Default::default()
-    //         }),
-    //     }]);
+        let renderer = &mut self.renderer;
+        renderer.update(&mut self.renderer_ctx, &self.queue, &mut imgui.renderer);
+        renderer.render(ui);
 
-    //     //
-    //     // Set up dear imgui wgpu renderer
-    //     //
-    //     let clear_color = wgpu::Color {
-    //         r: 0.1,
-    //         g: 0.2,
-    //         b: 0.3,
-    //         a: 1.0,
-    //     };
+        let mut encoder: wgpu::CommandEncoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
-    //     let renderer_config = RendererConfig {
-    //         texture_format: self.surface_desc.format,
-    //         ..Default::default()
-    //     };
+        if imgui.last_cursor != ui.mouse_cursor() {
+            imgui.last_cursor = ui.mouse_cursor();
+        }
 
-    //     let renderer = Renderer::new(&mut context, &self.device, &self.queue, renderer_config);
-    //     let last_frame = Instant::now();
-    //     let last_cursor = None;
+        let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: None,
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &self.texture_view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(imgui.clear_color),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+        });
 
-    //     self.imgui = Some(ImguiState {
-    //         context,
-    //         platform,
-    //         renderer,
-    //         clear_color,
-    //         last_frame,
-    //         last_cursor,
-    //     })
-    // }
+        imgui
+            .renderer
+            .render(
+                imgui.context.render(),
+                &self.queue,
+                &self.device,
+                &mut rpass,
+            )
+            .expect("Rendering failed");
 
-    // fn
+        drop(rpass);
+
+        self.queue.submit(Some(encoder.finish()));
+    }
 }
 
-pub fn start_ui(app: &App) -> tokio::task::JoinHandle<()> {
+pub fn start_ui(renderer_ctx: AppRendererContext) -> tokio::task::JoinHandle<()> {
     // FIXME: Apparently this is undefined behavior, figure this out.
     #![warn(static_mut_refs)]
     tokio::task::spawn_blocking(|| {
@@ -222,9 +237,8 @@ pub fn start_ui(app: &App) -> tokio::task::JoinHandle<()> {
         let render_signal = unsafe { &mut LAYER.render_signal };
         let egl_pointers = unsafe { LAYER.egl_pointers.as_ref().unwrap() };
 
-        let start_time = SystemTime::now();
-
         let mut maybe_render_ctx = None;
+        let mut renderer_ctx = Some(renderer_ctx);
 
         loop {
             // Wait for the render thread to be woken up.
@@ -235,7 +249,6 @@ pub fn start_ui(app: &App) -> tokio::task::JoinHandle<()> {
 
             // Make sure the context is on the current thread.
             unsafe {
-                println!("{egl_pointers:?}");
                 eglMakeCurrent(
                     egl_pointers.display,
                     ptr::null_mut(),
@@ -244,14 +257,44 @@ pub fn start_ui(app: &App) -> tokio::task::JoinHandle<()> {
                 );
             }
 
-            let render_ctx =
-                maybe_render_ctx.get_or_insert_with(|| unsafe { RenderContext::init_on_current_context() });
-            let gl = &mut render_ctx.gl;
+            let render_ctx = maybe_render_ctx.get_or_insert_with(|| unsafe {
+                RenderContext::init_on_current_context(
+                    renderer_ctx.take().expect("renderer_ctx was already taken"),
+                    egl_pointers,
+                )
+            });
+
+            render_ctx.render();
 
             unsafe {
-                gl.bind_framebuffer(glow::FRAMEBUFFER, Some(render_ctx.framebuffer));
+                let gl = &mut render_ctx.gl;
+                gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(render_ctx.imgui_fb));
+                let texture_id = render_ctx
+                    .texture
+                    .as_hal::<wgpu::hal::api::Gles, _, _>(|x| {
+                        if let wgpu::hal::gles::TextureInner::Texture { raw, .. } = x.unwrap().inner
+                        {
+                            raw
+                        } else {
+                            panic!("not a texture!")
+                        }
+                    });
                 gl.framebuffer_texture_2d(
-                    glow::FRAMEBUFFER,
+                    glow::READ_FRAMEBUFFER,
+                    glow::COLOR_ATTACHMENT0,
+                    glow::TEXTURE_2D,
+                    Some(texture_id),
+                    0,
+                );
+                assert_eq!(
+                    gl.check_framebuffer_status(glow::READ_FRAMEBUFFER),
+                    glow::FRAMEBUFFER_COMPLETE,
+                    "GL read framebuffer has error status"
+                );
+
+                gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, Some(render_ctx.openxr_fb));
+                gl.framebuffer_texture_2d(
+                    glow::DRAW_FRAMEBUFFER,
                     glow::COLOR_ATTACHMENT0,
                     glow::TEXTURE_2D,
                     Some(glow::NativeTexture(
@@ -260,25 +303,28 @@ pub fn start_ui(app: &App) -> tokio::task::JoinHandle<()> {
                     0,
                 );
                 assert_eq!(
-                    gl.check_framebuffer_status(glow::FRAMEBUFFER),
-                    glow::FRAMEBUFFER_COMPLETE
+                    gl.check_framebuffer_status(glow::DRAW_FRAMEBUFFER),
+                    glow::FRAMEBUFFER_COMPLETE,
+                    "GL draw framebuffer has error status"
                 );
 
-                let d = start_time.elapsed().unwrap().as_secs_f32();
-                gl.clear_color(
-                    d.sin().mul_add(0.5, 0.5),
-                    (d * 0.75).cos().mul_add(0.5, 0.5),
-                    (d * 0.25).sin().mul_add(0.5, 0.5),
-                    1.0,
+                gl.disable(glow::SCISSOR_TEST);
+                gl.blit_framebuffer(
+                    0,
+                    0,
+                    1280,
+                    720,
+                    0,
+                    720,
+                    1280,
+                    0,
+                    glow::COLOR_BUFFER_BIT,
+                    glow::NEAREST,
                 );
-                gl.clear(glow::COLOR_BUFFER_BIT);
+                assert_eq!(gl.get_error(), glow::NO_ERROR, "GL framebuffer blit failed");
 
                 gl.bind_framebuffer(glow::FRAMEBUFFER, None);
             }
-
-            // render_context.device.texture_from_raw(name, desc, drop_callback)
-
-            // wgpu::hal::gles::Texture
 
             // Unbind the context.
             unsafe {
@@ -295,34 +341,4 @@ pub fn start_ui(app: &App) -> tokio::task::JoinHandle<()> {
             render_signal.condvar.notify_one();
         }
     })
-
-    // AppWindow::new(renderer_context)
-    // let adapter = unsafe {
-    //     wgpu::hal::gles::Adapter::new_external(
-    //         gl_loader,
-    //         GlBackendOptions {
-    //             gles_minor_version: Gles3MinorVersion::Automatic,
-    //             fence_behavior: GlFenceBehavior::Normal,
-    //         },
-    //     )
-    //     .unwrap()
-    // };
-
-    // use wgpu::hal;
-    // wgpu::hal::gles::Adapter::new_external(fun, options)
-    // // let instance = <hal::api::Gles as hal::Api>::Instance::init(/* feature toggles */)?;
-
-    // // glow::Context::from_loader_function_cstr(loader_function)
-    // let raw_display_ptr = ptr::null();
-    // let raw_config_ptr = ptr::null();
-    // let raw_display = glutin::display::RawDisplay::Egl(raw_display_ptr);
-    // let display = unsafe {
-    //     glutin::api::egl::display::Display::new(raw_display).unwrap()
-    // };
-
-    // display.get_proc_address(addr)
-
-    // let config = glutin::config::Config::Egl(glutin::api::egl::config::Config);
-
-    // println!("eglMakeCurrent {:?}", eglMakeCurrent as *const ())
 }
