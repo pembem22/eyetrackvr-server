@@ -149,7 +149,7 @@ fn start_desktop_tasks(args: &Args, app: &App) -> Vec<JoinHandle<()>> {
             }));
         }
 
-        #[cfg(not(feature = "inference"))]
+        #[cfg(not(feature = "gui"))]
         println!("Compiled without GUI support, starting headless anyway")
     }
 

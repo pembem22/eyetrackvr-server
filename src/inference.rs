@@ -19,22 +19,35 @@ pub const FRAME_RESIZE_H: u32 = 64;
 
 pub fn eye_inference(
     mut rx: Receiver<Frame>,
-    model_path: &str,
+    #[cfg(not(target_os = "android"))] model_path: &str,
     threads: usize,
     tx: Sender<EyeState>,
     eye: Eye,
 ) -> JoinHandle<()> {
+    #[cfg(not(target_os = "android"))]
     let model_path = model_path.to_owned();
 
     tokio::task::spawn_blocking(move || {
-        let mut model = Session::builder()
+        let session_builder = Session::builder()
             .unwrap()
             .with_optimization_level(GraphOptimizationLevel::Level3)
             .unwrap()
             .with_intra_threads(threads)
-            .unwrap()
-            .commit_from_file(model_path)
             .unwrap();
+
+        let mut model = {
+            #[cfg(target_os = "android")]
+            {
+                const MODEL_BYTES: &[u8] = include_bytes!("../model.onnx");
+                session_builder.commit_from_memory_directly(MODEL_BYTES)
+            }
+
+            #[cfg(not(target_os = "android"))]
+            {
+                session_builder.commit_from_file(model_path)
+            }
+        }
+        .unwrap();
 
         let handle = Handle::current();
 

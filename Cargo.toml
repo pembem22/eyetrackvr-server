@@ -63,3 +63,7 @@ mio-serial = { git = "https://github.com/pembem22/mio-serial.git", branch = "fix
 imgui-wgpu = { git = "https://github.com/Yatekii/imgui-wgpu-rs", rev = "7408a75" }
 # This patch removes all EGL context switching from inside of wgpu-hal.
 wgpu = { git = "https://github.com/pembem22/wgpu", branch = "v25.0.2-egl-manual-context" }
+# Fix missing linking lib on Android
+ort = { git = "https://github.com/pembem22/ort", branch = "main" }
+ort-sys = { git = "https://github.com/pembem22/ort", branch = "main" }
+

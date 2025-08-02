@@ -2663,8 +2663,7 @@ dependencies = [
 [[package]]
 name = "ort"
 version = "2.0.0-rc.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1fa7e49bd669d32d7bc2a15ec540a527e7764aec722a45467814005725bcd721"
+source = "git+https://github.com/pembem22/ort?branch=main#91ae1a15d4453dd6692611200172f3ef18cd9fec"
 dependencies = [
  "ndarray",
  "ort-sys",
@@ -2675,8 +2674,7 @@ dependencies = [
 [[package]]
 name = "ort-sys"
 version = "2.0.0-rc.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e2aba9f5c7c479925205799216e7e5d07cc1d4fa76ea8058c60a9a30f6a4e890"
+source = "git+https://github.com/pembem22/ort?branch=main#91ae1a15d4453dd6692611200172f3ef18cd9fec"
 dependencies = [
  "flate2",
  "pkg-config",
@@ -3575,7 +3573,7 @@ dependencies = [
  "getrandom 0.3.3",
  "once_cell",
  "rustix 1.0.8",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]

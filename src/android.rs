@@ -129,5 +129,55 @@ fn start_android_tasks(app: &App) -> Vec<JoinHandle<()>> {
         filtered_eyes_rx: app.filtered_eyes_rx.activate_cloned(),
     }));
 
+    // Inference, process the data, output OSC
+
+    #[cfg(feature = "inference")]
+    {
+        use crate::camera::Eye;
+        use crate::data_processing::{filter_eye, merge_eyes};
+        use crate::inference::eye_inference;
+
+        const THREADS_PER_EYE: usize = 1;
+
+        tasks.push(eye_inference(
+            app.l_cam_rx.activate_cloned(),
+            THREADS_PER_EYE,
+            app.l_raw_eye_tx.clone(),
+            Eye::L,
+        ));
+        tasks.push(eye_inference(
+            app.r_cam_rx.activate_cloned(),
+            THREADS_PER_EYE,
+            app.r_raw_eye_tx.clone(),
+            Eye::R,
+        ));
+
+        // Filter
+
+        tasks.push(filter_eye(
+            app.l_raw_eye_rx.activate_cloned(),
+            app.l_filtered_eye_tx.clone(),
+        ));
+        tasks.push(filter_eye(
+            app.r_raw_eye_rx.activate_cloned(),
+            app.r_filtered_eye_tx.clone(),
+        ));
+
+        // Merge
+
+        tasks.push(merge_eyes(
+            app.l_filtered_eye_rx.activate_cloned(),
+            app.r_filtered_eye_rx.activate_cloned(),
+            app.filtered_eyes_tx.clone(),
+        ));
+
+        // OSC sender
+
+        // tasks.push(start_osc_sender(
+        //     app.filtered_eyes_rx.activate_cloned(),
+        //     args.osc_out_address.clone(),
+        // ));
+    }
+
     tasks
 }

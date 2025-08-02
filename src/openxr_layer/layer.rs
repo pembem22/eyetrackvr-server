@@ -284,9 +284,8 @@ impl OpenXRLayer {
 
         let swapchain = self.debug_window_swapchain.as_mut().unwrap();
         let image_index = swapchain.acquire_image().unwrap();
-        // TODO: figure out how to detect a timeout, cause there's no way to know atm.
         swapchain
-            .wait_image(xr::Duration::from_nanos(100000))
+            .wait_image(xr::Duration::INFINITE)
             .unwrap();
 
         self.egl_image = self.swapchain_images[image_index as usize];
