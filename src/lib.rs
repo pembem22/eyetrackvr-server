@@ -8,7 +8,7 @@ mod structs;
 mod camera_texture;
 #[cfg(feature = "gui")]
 mod ui;
-#[cfg(all(feature = "gui", platform = "windows"))]
+#[cfg(all(feature = "gui", target_os = "windows"))]
 mod window_desktop;
 
 mod window_android;
@@ -27,3 +27,6 @@ pub mod desktop;
 mod android;
 #[cfg(feature = "openxr-api-layer")]
 mod openxr_layer;
+
+#[cfg(all(feature = "openxr-api-layer", feature = "inference"))]
+mod openxr_output;

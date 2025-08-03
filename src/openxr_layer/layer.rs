@@ -1,9 +1,8 @@
 use std::{
     collections::HashMap,
-    ffi::c_void,
+    ffi::{c_char, c_void},
     ptr,
     sync::{Condvar, Mutex},
-    time::SystemTime,
 };
 
 use once_cell::sync::Lazy;
@@ -20,7 +19,7 @@ use openxr::{self as xr};
 #[cfg(feature = "android")]
 use openxr_sys::LoaderInitInfoAndroidKHR;
 
-// use crate::server::OSCServer;
+use crate::openxr_output::OPENXR_OUTPUT_BRIDGE;
 
 pub static mut LAYER: Lazy<OpenXRLayer> = Lazy::new(OpenXRLayer::new);
 
@@ -66,7 +65,6 @@ pub struct OpenXRLayer {
     pub enumerate_instance_extensions_properties: Option<pfn::EnumerateInstanceExtensionProperties>,
     pub get_system_properties: Option<pfn::GetSystemProperties>,
     pub suggest_interaction_profile_bindings: Option<pfn::SuggestInteractionProfileBindings>,
-    pub path_to_string: Option<pfn::PathToString>,
     pub create_action_space: Option<pfn::CreateActionSpace>,
     pub get_action_state_pose: Option<pfn::GetActionStatePose>,
     pub locate_space: Option<pfn::LocateSpace>,
@@ -89,16 +87,13 @@ pub struct OpenXRLayer {
     pub render_signal: RenderSignal,
 
     debug_window_swapchain: Option<xr::Swapchain<xr::OpenGlEs>>,
+
     view_reference_space: Option<xr::Space>,
-
-    possible_spaces: HashMap<(xr::Action<xr::Posef>, xr::Path), xr::Space>,
-
-    eye_gaze_action: Option<xr::Action<xr::Posef>>,
-    l_eye_gaze_space: Option<xr::Space>,
-    r_eye_gaze_space: Option<xr::Space>,
-
-    start_time: SystemTime,
-    // server: OSCServer,
+    // `xr::Action<xr::Posef>` doesn't implement `Cmp` or `Hash`, so use `xr_sys::Action`.
+    possible_spaces: HashMap<(xr_sys::Action, xr::Path), xr_sys::Space>,
+    // See above why not `xr::Action<xr::Posef>`.
+    eye_gaze_action: Option<xr_sys::Action>,
+    eye_gaze_space: Option<xr_sys::Space>,
 }
 
 impl OpenXRLayer {
@@ -111,11 +106,9 @@ impl OpenXRLayer {
             enumerate_instance_extensions_properties: None,
             get_system_properties: None,
             suggest_interaction_profile_bindings: None,
-            path_to_string: None,
             eye_gaze_action: None,
             create_action_space: None,
-            l_eye_gaze_space: None,
-            r_eye_gaze_space: None,
+            eye_gaze_space: None,
             get_action_state_pose: None,
             locate_space: None,
             locate_views: None,
@@ -126,8 +119,6 @@ impl OpenXRLayer {
             begin_frame: None,
             create_reference_space: None,
             possible_spaces: HashMap::new(),
-            start_time: SystemTime::now(),
-            // server: OSCServer::new(),
             application_context: ptr::null_mut(),
             application_vm: ptr::null_mut(),
 
@@ -284,9 +275,7 @@ impl OpenXRLayer {
 
         let swapchain = self.debug_window_swapchain.as_mut().unwrap();
         let image_index = swapchain.acquire_image().unwrap();
-        swapchain
-            .wait_image(xr::Duration::INFINITE)
-            .unwrap();
+        swapchain.wait_image(xr::Duration::INFINITE).unwrap();
 
         self.egl_image = self.swapchain_images[image_index as usize];
 
@@ -353,7 +342,11 @@ impl OpenXRLayer {
             next: ptr::null(),
             eye_visibility: EyeVisibility::BOTH,
             layer_flags: CompositionLayerFlags::EMPTY,
-            space: self.view_reference_space.as_ref().unwrap().as_raw(),
+            space: self
+                .view_reference_space
+                .as_ref()
+                .expect("view reference space is not initialized")
+                .as_raw(),
             pose: Posef {
                 position: Vector3f {
                     x: 0.0,
@@ -407,47 +400,52 @@ impl OpenXRLayer {
         unsafe { self.begin_frame.unwrap()(session, frame_begin_info) }
     }
 
-    /*
     pub unsafe fn enumerate_instance_extension_properties(
         &self,
         layer_name: *const c_char,
         property_capacity_input: u32,
         property_count_output: *mut u32,
-        properties_ptr: *mut ExtensionProperties,
-    ) -> Result {
-        let mut result = self.enumerate_instance_extensions_properties.unwrap()(
-            layer_name,
-            property_capacity_input,
-            property_count_output,
-            properties_ptr,
-        );
+        properties_ptr: *mut xr_sys::ExtensionProperties,
+    ) -> xr_sys::Result {
+        let mut result = unsafe {
+            self.enumerate_instance_extensions_properties.unwrap()(
+                layer_name,
+                property_capacity_input,
+                property_count_output,
+                properties_ptr,
+            )
+        };
 
-        let base_offset = *property_count_output as usize;
-        *property_count_output += ADVERTISED_EXTENSIONS.len() as u32;
+        let base_offset = unsafe { *property_count_output } as usize;
+        unsafe { *property_count_output += ADVERTISED_EXTENSIONS.len() as u32 };
         if property_capacity_input > 0 {
-            if property_capacity_input < *property_count_output {
-                result = Result::ERROR_SIZE_INSUFFICIENT;
+            if property_capacity_input < unsafe { *property_count_output } {
+                result = xr_sys::Result::ERROR_SIZE_INSUFFICIENT;
             } else {
-                result = Result::SUCCESS;
+                result = xr_sys::Result::SUCCESS;
 
-                let properties = std::slice::from_raw_parts_mut(
-                    properties_ptr,
-                    (*property_count_output).try_into().unwrap(),
-                );
+                let properties = unsafe {
+                    std::slice::from_raw_parts_mut(
+                        properties_ptr,
+                        (*property_count_output).try_into().unwrap(),
+                    )
+                };
 
-                for i in base_offset..*property_count_output as usize {
-                    if properties[i].ty != StructureType::EXTENSION_PROPERTIES {
-                        result = Result::ERROR_VALIDATION_FAILURE;
+                for i in base_offset..unsafe { *property_count_output } as usize {
+                    if properties[i].ty != xr_sys::StructureType::EXTENSION_PROPERTIES {
+                        result = xr_sys::Result::ERROR_VALIDATION_FAILURE;
                         break;
                     }
 
                     let extension = &ADVERTISED_EXTENSIONS[i - base_offset];
 
-                    std::ptr::copy(
-                        extension.name.as_ptr(),
-                        properties[i].extension_name.as_mut_ptr() as *mut u8,
-                        extension.name.len(),
-                    );
+                    unsafe {
+                        std::ptr::copy(
+                            extension.name.as_ptr(),
+                            properties[i].extension_name.as_mut_ptr() as *mut u8,
+                            extension.name.len(),
+                        )
+                    };
                     properties[i].extension_version = extension.version;
                 }
             }
@@ -458,44 +456,51 @@ impl OpenXRLayer {
 
     pub unsafe fn get_system_properties(
         &self,
-        instance: Instance,
-        system_id: SystemId,
-        properties: *mut SystemProperties,
-    ) -> Result {
+        instance: xr_sys::Instance,
+        system_id: xr_sys::SystemId,
+        properties: *mut xr_sys::SystemProperties,
+    ) -> xr_sys::Result {
         println!("--> get_system_properties");
 
-        let mut property_ptr = properties as *mut BaseOutStructure;
+        let mut property_ptr = properties as *mut xr_sys::BaseOutStructure;
         while !property_ptr.is_null() {
-            let property = &mut *property_ptr;
+            let property = unsafe { &mut *property_ptr };
 
             println!("get_system_properties type {:?}", property.ty);
 
-            if property.ty == StructureType::SYSTEM_EYE_GAZE_INTERACTION_PROPERTIES_EXT {
-                let property = &mut *(property_ptr as *mut SystemEyeGazeInteractionPropertiesEXT);
+            if property.ty == xr_sys::StructureType::SYSTEM_EYE_GAZE_INTERACTION_PROPERTIES_EXT {
+                let property = unsafe {
+                    &mut *(property_ptr as *mut xr_sys::SystemEyeGazeInteractionPropertiesEXT)
+                };
                 property.supports_eye_gaze_interaction = true.into();
             }
 
             property_ptr = property.next;
         }
 
-        let result = self.get_system_properties.unwrap()(instance, system_id, properties);
-        if result != Result::SUCCESS {
+        let result =
+            unsafe { self.get_system_properties.unwrap()(instance, system_id, properties) };
+        if result != xr_sys::Result::SUCCESS {
             println!("get_system_properties result: {result:?}");
             return result;
         }
 
         println!("<-- get_system_properties");
-        Result::SUCCESS
+        xr_sys::Result::SUCCESS
     }
 
     pub unsafe fn suggest_interaction_profile_bindings(
         &mut self,
-        instance: Instance,
-        suggested_bindings: *const InteractionProfileSuggestedBinding,
-    ) -> Result {
-        let suggested_bindings = &*suggested_bindings;
+        instance: xr_sys::Instance,
+        suggested_bindings: *const xr_sys::InteractionProfileSuggestedBinding,
+    ) -> xr_sys::Result {
+        let xr_instance = self.instance.as_mut().unwrap();
 
-        let interaction_profile = self.path_to_string(suggested_bindings.interaction_profile);
+        let suggested_bindings = unsafe { &*suggested_bindings };
+
+        let interaction_profile = xr_instance
+            .path_to_string(suggested_bindings.interaction_profile)
+            .unwrap();
 
         println!(
             "suggest_interaction_profile_bindings {:?} {}",
@@ -503,22 +508,25 @@ impl OpenXRLayer {
         );
 
         if interaction_profile != "/interaction_profiles/ext/eye_gaze_interaction" {
-            return self.suggest_interaction_profile_bindings.unwrap()(
-                instance,
-                suggested_bindings,
-            );
+            return unsafe {
+                self.suggest_interaction_profile_bindings.unwrap()(instance, suggested_bindings)
+            };
         }
 
-        let suggested_bindings = std::slice::from_raw_parts(
-            suggested_bindings.suggested_bindings,
-            suggested_bindings
-                .count_suggested_bindings
-                .try_into()
-                .unwrap(),
-        );
+        let suggested_bindings = unsafe {
+            std::slice::from_raw_parts(
+                suggested_bindings.suggested_bindings,
+                suggested_bindings
+                    .count_suggested_bindings
+                    .try_into()
+                    .unwrap(),
+            )
+        };
 
         for suggested_binding in suggested_bindings {
-            let binding = self.path_to_string(suggested_binding.binding);
+            let binding = xr_instance
+                .path_to_string(suggested_binding.binding)
+                .unwrap();
             println!("suggest_interaction_profile_bindings binding path {binding}");
             if binding == "/user/eyes_ext/input/gaze_ext/pose" {
                 self.eye_gaze_action = Some(suggested_binding.action);
@@ -527,221 +535,274 @@ impl OpenXRLayer {
                     suggested_binding.action
                 );
 
-                if let Some(l_eye_gaze_space) = self
-                    .possible_spaces
-                    // TODO: Don't hardcode "/user/hand/left" as Path(1)
-                    .get(&(suggested_binding.action, Path::from_raw(1)))
-                {
-                    self.l_eye_gaze_space = Some(*l_eye_gaze_space);
-                    println!("L eye gaze space found: {:?}", l_eye_gaze_space);
-                }
-                if let Some(r_eye_gaze_space) = self
-                    .possible_spaces
-                    // TODO: Don't hardcode "/user/hand/right" as Path(2)
-                    .get(&(suggested_binding.action, Path::from_raw(2)))
-                {
-                    self.r_eye_gaze_space = Some(*r_eye_gaze_space);
-                    println!("R eye gaze space found: {:?}", r_eye_gaze_space);
-                }
+                assert_eq!(
+                    self.possible_spaces
+                        .keys()
+                        .filter(|(action, _)| action == &suggested_binding.action)
+                        .count(),
+                    1,
+                    "more than one subaction paths exist for binding `/user/eyes_ext/input/gaze_ext/pose`"
+                );
+
+                let gaze_space = *self.possible_spaces
+                        .get(&(suggested_binding.action, xr::Path::NULL))
+                        .expect("eye tracking interaction profile binding suggested, but no corresponding action space was found");
+                println!("gaze space found {gaze_space:?}");
+
+                self.eye_gaze_space = Some(gaze_space);
 
                 self.possible_spaces.clear();
-
-                println!(
-                    "test {:?} {:?}",
-                    self.path_to_string(Path::from_raw(1)), // "/user/hand/left"
-                    self.path_to_string(Path::from_raw(2)), // "/user/hand/right"
-                );
             }
         }
 
-        Result::SUCCESS
+        xr_sys::Result::SUCCESS
     }
 
     pub unsafe fn create_action_space(
         &mut self,
-        session: Session,
-        create_info: *const ActionSpaceCreateInfo,
-        space: *mut Space,
-    ) -> Result {
-        println!("--> create_action_space {:?}", *create_info);
-        let result = self.create_action_space.unwrap()(session, create_info, space);
-        if result != Result::SUCCESS {
-            return result;
+        session: xr_sys::Session,
+        create_info: *const xr_sys::ActionSpaceCreateInfo,
+        space: *mut xr_sys::Space,
+    ) -> xr_sys::Result {
+        unsafe {
+            println!("--> create_action_space {:?}", *create_info);
+            let result = self.create_action_space.unwrap()(session, create_info, space);
+            if result != xr_sys::Result::SUCCESS {
+                return result;
+            }
+
+            // Spaced are created before actions, so save them all and choose later when the action is known.
+            let create_info = &*create_info;
+            self.possible_spaces
+                .insert((create_info.action, create_info.subaction_path), *space);
+
+            println!("<-- create_action_space");
+            xr_sys::Result::SUCCESS
         }
-
-        // Spaced are created before actions, so save them all and choose later when the action is known.
-        let create_info = &*create_info;
-        self.possible_spaces
-            .insert((create_info.action, create_info.subaction_path), *space);
-
-        println!("<-- create_action_space");
-        Result::SUCCESS
     }
 
     pub unsafe fn get_action_state_pose(
         &self,
-        session: Session,
-        get_info: *const ActionStateGetInfo,
-        state: *mut ActionStatePose,
-    ) -> Result {
-        if !self
-            .eye_gaze_action
-            .is_some_and(|a| a == (*get_info).action)
-        {
-            return self.get_action_state_pose.unwrap()(session, get_info, state);
+        session: xr_sys::Session,
+        get_info: *const xr_sys::ActionStateGetInfo,
+        state: *mut xr_sys::ActionStatePose,
+    ) -> xr_sys::Result {
+        unsafe {
+            if !self
+                .eye_gaze_action
+                .is_some_and(|a| a == (*get_info).action)
+            {
+                return self.get_action_state_pose.unwrap()(session, get_info, state);
+            }
+
+            // println!("--> get_action_state_pose {:?}", (*get_info).subaction_path);
+
+            let state = &mut *state;
+
+            // Report tracking as disabled if there is no data incoming.
+            state.is_active = OPENXR_OUTPUT_BRIDGE
+                .get()
+                .map(|mutex| mutex.lock().expect("failed to lock OpenXR output bridge"))
+                // False if there's no bridge yet.
+                .is_some_and(|mut bridge| {
+                    // False if there has been no data yet.
+                    bridge.get_gaze().is_some_and(|gaze| {
+                        gaze.latest_timestamp().elapsed().unwrap()
+                            < std::time::Duration::from_millis(50)
+                    })
+                })
+                .into();
+
+            // println!("<-- get_action_state_pose");
+            xr_sys::Result::SUCCESS
         }
-
-        // println!("--> get_action_state_pose {:?}", (*get_info).subaction_path);
-
-        let eye_gaze_data = self.server.eye_gaze_data.lock().unwrap();
-        let state = &mut *state;
-
-        // Report tracking as disabled if there is no data incoming.
-        state.is_active =
-            (eye_gaze_data.time.elapsed().unwrap() < Duration::from_millis(50)).into();
-
-        // println!("<-- get_action_state_pose");
-        Result::SUCCESS
     }
 
     pub unsafe fn locate_space(
         &self,
-        space: Space,
-        base_space: Space,
-        time: Time,
-        location: *mut SpaceLocation,
-    ) -> Result {
-        // println!("--> locate_space {:?} {:?} {:?}", space, base_space, time);
+        space: xr_sys::Space,
+        base_space: xr_sys::Space,
+        time: xr_sys::Time,
+        location: *mut xr_sys::SpaceLocation,
+    ) -> xr_sys::Result {
+        unsafe {
+            // println!("--> locate_space {:?} {:?} {:?}", space, base_space, time);
 
-        let is_left = self.l_eye_gaze_space.is_some_and(|s| s == space);
-        let is_right = self.r_eye_gaze_space.is_some_and(|s| s == space);
+            if !self.eye_gaze_space.is_some_and(|s| s == space) {
+                return self.locate_space.unwrap()(space, base_space, time, location);
+            }
 
-        if !is_left && !is_right {
-            return self.locate_space.unwrap()(space, base_space, time, location);
-        }
+            // println!("locate_space {:?} {:?}", space, base_space);
 
-        // println!("locate_space {:?} {:?}", space, base_space);
-
-        let location = &mut *location;
-
-        location.location_flags |= SpaceLocationFlags::POSITION_TRACKED;
-        location.location_flags |= SpaceLocationFlags::ORIENTATION_TRACKED;
-
-        let eye_gaze_data = self.server.eye_gaze_data.lock().unwrap();
-
-        let (pitch, yaw) = if is_left {
-            (eye_gaze_data.l_pitch, eye_gaze_data.l_yaw)
-        } else {
-            (eye_gaze_data.r_pitch, eye_gaze_data.r_yaw)
-        };
-
-        use quaternion_core as quat;
-        let q = quat::from_euler_angles(
-            quat::RotationType::Extrinsic,
-            quat::RotationSequence::XYZ,
-            [pitch, yaw, 0.0],
-        );
-
-        // TODO: Figure out if this is correct position.
-        // If eyeball position is required, can use `xrLocateView` to query camera position.
-        location.pose.position = Vector3f {
-            x: 0.0,
-            y: 0.0,
-            z: 0.0,
-        };
-        location.pose.orientation = Quaternionf {
-            w: q.0,
-            x: q.1[0],
-            y: q.1[1],
-            z: q.1[2],
-        };
-
-        // println!("locate_space {:?}", location);
-
-        if !location.next.is_null() {
-            let eye_gaze_sample_time = &mut *(location.next as *mut EyeGazeSampleTimeEXT);
-            eye_gaze_sample_time.time = Time::from_nanos(0);
-            // println!("locate_space {:?}", eye_gaze_sample_time);
-        }
-
-        Result::SUCCESS
-    }
-
-    pub unsafe fn locate_views(
-        &self,
-        session: Session,
-        view_locate_info: *const ViewLocateInfo,
-        view_state: *mut ViewState,
-        view_capacity_input: u32,
-        view_count_output: *mut u32,
-        views: *mut View,
-    ) -> Result {
-        let res = self.locate_views.unwrap()(
-            session,
-            view_locate_info,
-            view_state,
-            view_capacity_input,
-            view_count_output,
-            views,
-        );
-
-        if res != Result::SUCCESS {
-            return res;
-        }
-
-        if (*view_locate_info).view_configuration_type != ViewConfigurationType::PRIMARY_STEREO {
-            return Result::SUCCESS;
-        }
-
-        let views = std::slice::from_raw_parts_mut(views, (*view_count_output).try_into().unwrap());
-
-        let apply_pupil_offset = |view: &mut View, is_left: bool| {
-            use quat::QuaternionOps;
-            use quaternion_core as quat;
-
-            const EYEBALL_RADIUS: f32 = 12.0 * 0.1;
-
-            let pos = view.pose.position;
-            let mut pos = [pos.x, pos.y, pos.z];
-
-            let quat = view.pose.orientation;
-            let fwd_q = (quat.w, [quat.x, quat.y, quat.z]);
-
-            let mut fwd_v = quat::to_rotation_vector(fwd_q);
-            fwd_v = quat::normalize(fwd_v);
-
-            pos = pos.sub(fwd_v.scale(EYEBALL_RADIUS));
-
-            let eye_gaze_data = self.server.eye_gaze_data.lock().unwrap();
-
-            let (pitch, yaw) = if is_left {
-                (eye_gaze_data.l_pitch, eye_gaze_data.l_yaw)
-            } else {
-                (eye_gaze_data.r_pitch, eye_gaze_data.r_yaw)
+            // Determine where the VIEW space is in relation to the requested `base_space`.
+            let base_from_view_space = {
+                let mut view_location = xr_sys::SpaceLocation {
+                    ty: xr_sys::StructureType::SPACE_LOCATION,
+                    next: std::ptr::null_mut(),
+                    location_flags: xr_sys::SpaceLocationFlags::EMPTY,
+                    pose: xr_sys::Posef {
+                        orientation: xr_sys::Quaternionf {
+                            x: 0.0,
+                            y: 0.0,
+                            z: 0.0,
+                            w: 1.0,
+                        },
+                        position: xr_sys::Vector3f {
+                            x: 0.0,
+                            y: 0.0,
+                            z: 0.0,
+                        },
+                    },
+                };
+                let result = self.locate_space.unwrap()(
+                    self.view_reference_space.as_ref().unwrap().as_raw(),
+                    base_space,
+                    time,
+                    &mut view_location,
+                );
+                if result != xr_sys::Result::SUCCESS {
+                    return result;
+                }
+                view_location.pose
             };
 
-            let gaze_q = quat::from_euler_angles(
+            let location: &mut openxr_sys::SpaceLocation = &mut *location;
+
+            location.location_flags |= xr_sys::SpaceLocationFlags::POSITION_TRACKED;
+            location.location_flags |= xr_sys::SpaceLocationFlags::ORIENTATION_TRACKED;
+
+            let gaze = OPENXR_OUTPUT_BRIDGE
+                .get()
+                .expect("requested for gaze, but bridge was not initialized yet")
+                .lock()
+                .expect("failed to lock OpenXR output bridge")
+                .get_gaze()
+                .expect("requested for gaze, but no data has arrived yet");
+
+            use quaternion_core as quat;
+            let q_gaze_in_view = quat::from_euler_angles(
                 quat::RotationType::Extrinsic,
                 quat::RotationSequence::XYZ,
-                [pitch, yaw, 0.0],
+                [-gaze.pitch, -gaze.yaw, 0.0],
+            );
+            let q_base_in_view: quat::Quaternion<f32> = (
+                base_from_view_space.orientation.w,
+                [
+                    base_from_view_space.orientation.x,
+                    base_from_view_space.orientation.y,
+                    base_from_view_space.orientation.z,
+                ],
             );
 
-            let gaze_fwd_q = quat::mul(fwd_q, gaze_q);
-            let gaze_fwd_v = quat::normalize(quat::to_rotation_vector(gaze_fwd_q));
+            // Convert gaze from the VIEW space into `base_space`.
+            let q_gaze_in_base = quat::mul(q_base_in_view, q_gaze_in_view);
 
-            pos = pos.add(gaze_fwd_v.scale(EYEBALL_RADIUS));
+            location.pose.position = Vector3f {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            };
+            location.pose.orientation = Quaternionf {
+                w: q_gaze_in_base.0,
+                x: q_gaze_in_base.1[0],
+                y: q_gaze_in_base.1[1],
+                z: q_gaze_in_base.1[2],
+            };
 
-            view.pose.position = Vector3f {
-                x: pos[0],
-                y: pos[1],
-                z: pos[2],
+            // println!("locate_space {:?}", location);
+
+            if !location.next.is_null() {
+                let eye_gaze_sample_time =
+                    &mut *(location.next as *mut xr_sys::EyeGazeSampleTimeEXT);
+                eye_gaze_sample_time.time = xr_sys::Time::from_nanos(0);
+                // println!("locate_space {:?}", eye_gaze_sample_time);
             }
-        };
 
-        apply_pupil_offset(&mut views[0], true);
-        apply_pupil_offset(&mut views[1], false);
+            xr_sys::Result::SUCCESS
+        }
+    }
 
-        Result::SUCCESS
+    /*
+    pub unsafe fn locate_views(
+        &self,
+        session: xr_sys::Session,
+        view_locate_info: *const xr_sys::ViewLocateInfo,
+        view_state: *mut xr_sys::ViewState,
+        view_capacity_input: u32,
+        view_count_output: *mut u32,
+        views: *mut xr_sys::View,
+    ) -> xr_sys::Result {
+        unsafe {
+            let res = self.locate_views.unwrap()(
+                session,
+                view_locate_info,
+                view_state,
+                view_capacity_input,
+                view_count_output,
+                views,
+            );
+
+            if res != xr_sys::Result::SUCCESS {
+                return res;
+            }
+
+            if (*view_locate_info).view_configuration_type
+                != xr_sys::ViewConfigurationType::PRIMARY_STEREO
+            {
+                return xr_sys::Result::SUCCESS;
+            }
+
+            let views =
+                std::slice::from_raw_parts_mut(views, (*view_count_output).try_into().unwrap());
+
+            let apply_pupil_offset = |view: &mut xr_sys::View, is_left: bool| {
+                use quat::QuaternionOps;
+                use quaternion_core as quat;
+
+                const EYEBALL_RADIUS: f32 = 12.0 * 0.1;
+
+                let pos = view.pose.position;
+                let mut pos = [pos.x, pos.y, pos.z];
+
+                let quat = view.pose.orientation;
+                let fwd_q = (quat.w, [quat.x, quat.y, quat.z]);
+
+                let mut fwd_v = quat::to_rotation_vector(fwd_q);
+                fwd_v = quat::normalize(fwd_v);
+
+                pos = pos.sub(fwd_v.scale(EYEBALL_RADIUS));
+
+                let eye_gaze_data = self.server.eye_gaze_data.lock().unwrap();
+
+                let (pitch, yaw) = if is_left {
+                    (eye_gaze_data.l_pitch, eye_gaze_data.l_yaw)
+                } else {
+                    (eye_gaze_data.r_pitch, eye_gaze_data.r_yaw)
+                };
+
+                let gaze_q = quat::from_euler_angles(
+                    quat::RotationType::Extrinsic,
+                    quat::RotationSequence::XYZ,
+                    [pitch, yaw, 0.0],
+                );
+
+                let gaze_fwd_q = quat::mul(fwd_q, gaze_q);
+                let gaze_fwd_v = quat::normalize(quat::to_rotation_vector(gaze_fwd_q));
+
+                pos = pos.add(gaze_fwd_v.scale(EYEBALL_RADIUS));
+
+                view.pose.position = Vector3f {
+                    x: pos[0],
+                    y: pos[1],
+                    z: pos[2],
+                }
+            };
+
+            apply_pupil_offset(&mut views[0], true);
+            apply_pupil_offset(&mut views[1], false);
+
+            xr_sys::Result::SUCCESS
+        }
     }
     */
 }

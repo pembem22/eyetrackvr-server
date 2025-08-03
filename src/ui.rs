@@ -99,8 +99,8 @@ impl AppRenderer {
 
     #[cfg(feature = "inference")]
     fn draw_inference_window(&self, ui: &imgui::Ui) {
-        use imgui::ImColor32;
         use crate::camera::CAMERA_FRAME_SIZE;
+        use imgui::ImColor32;
 
         ui.window("Inference").build(move || {
             // Cropped Camera Feeds

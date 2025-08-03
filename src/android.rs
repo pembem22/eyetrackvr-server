@@ -129,13 +129,14 @@ fn start_android_tasks(app: &App) -> Vec<JoinHandle<()>> {
         filtered_eyes_rx: app.filtered_eyes_rx.activate_cloned(),
     }));
 
-    // Inference, process the data, output OSC
+    // Inference, process the data, output
 
     #[cfg(feature = "inference")]
     {
         use crate::camera::Eye;
         use crate::data_processing::{filter_eye, merge_eyes};
         use crate::inference::eye_inference;
+        use crate::openxr_output::start_openxr_output;
 
         const THREADS_PER_EYE: usize = 1;
 
@@ -171,12 +172,8 @@ fn start_android_tasks(app: &App) -> Vec<JoinHandle<()>> {
             app.filtered_eyes_tx.clone(),
         ));
 
-        // OSC sender
-
-        // tasks.push(start_osc_sender(
-        //     app.filtered_eyes_rx.activate_cloned(),
-        //     args.osc_out_address.clone(),
-        // ));
+        // OpenXR output
+        start_openxr_output(&app.filtered_eyes_rx);
     }
 
     tasks

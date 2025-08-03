@@ -6,15 +6,25 @@ use std::ffi::c_char;
 
 use crate::openxr_layer::layer::LAYER;
 
+use openxr::SystemId;
+use openxr::Time;
 use openxr::{self as xr};
 
+use openxr_sys::ActionSpaceCreateInfo;
+use openxr_sys::ActionStateGetInfo;
+use openxr_sys::ActionStatePose;
+use openxr_sys::ExtensionProperties;
 use openxr_sys::FrameBeginInfo;
 use openxr_sys::FrameEndInfo;
+use openxr_sys::InteractionProfileSuggestedBinding;
 use openxr_sys::LoaderInitInfoBaseHeaderKHR;
 use openxr_sys::Session;
 use openxr_sys::SessionCreateInfo;
+use openxr_sys::Space;
+use openxr_sys::SpaceLocation;
 use openxr_sys::Swapchain;
 use openxr_sys::SwapchainCreateInfo;
+use openxr_sys::SystemProperties;
 use openxr_sys::{Instance, Result, pfn};
 
 use openxr_sys::{InstanceCreateInfo, loader::ApiLayerCreateInfo};
@@ -250,6 +260,71 @@ pub unsafe extern "system" fn xr_get_instance_proc_addr(
             >((*function).unwrap()));
         }
 
+        if api_name == "xrEnumerateInstanceExtensionProperties" {
+            layer.enumerate_instance_extensions_properties =
+                Some(std::mem::transmute::<
+                    pfn::VoidFunction,
+                    pfn::EnumerateInstanceExtensionProperties,
+                >((*function).unwrap()));
+            *function = Some(std::mem::transmute::<
+                pfn::EnumerateInstanceExtensionProperties,
+                pfn::VoidFunction,
+            >(xr_enumerate_instance_extension_properties));
+        }
+
+        if api_name == "xrGetSystemProperties" {
+            layer.get_system_properties = Some(std::mem::transmute::<
+                pfn::VoidFunction,
+                pfn::GetSystemProperties,
+            >((*function).unwrap()));
+            *function = Some(std::mem::transmute::<
+                pfn::GetSystemProperties,
+                pfn::VoidFunction,
+            >(xr_get_system_properties));
+        }
+
+        if api_name == "xrSuggestInteractionProfileBindings" {
+            layer.suggest_interaction_profile_bindings = Some(std::mem::transmute::<
+                pfn::VoidFunction,
+                pfn::SuggestInteractionProfileBindings,
+            >((*function).unwrap()));
+            *function = Some(std::mem::transmute::<
+                pfn::SuggestInteractionProfileBindings,
+                pfn::VoidFunction,
+            >(xr_suggest_interaction_profile_bindings));
+        }
+
+        if api_name == "xrCreateActionSpace" {
+            layer.create_action_space = Some(std::mem::transmute::<
+                pfn::VoidFunction,
+                pfn::CreateActionSpace,
+            >((*function).unwrap()));
+            *function = Some(std::mem::transmute::<
+                pfn::CreateActionSpace,
+                pfn::VoidFunction,
+            >(xr_create_action_space));
+        }
+
+        if api_name == "xrGetActionStatePose" {
+            layer.get_action_state_pose = Some(std::mem::transmute::<
+                pfn::VoidFunction,
+                pfn::GetActionStatePose,
+            >((*function).unwrap()));
+            *function = Some(std::mem::transmute::<
+                pfn::GetActionStatePose,
+                pfn::VoidFunction,
+            >(xr_get_action_state_pose));
+        }
+
+        if api_name == "xrLocateSpace" {
+            layer.locate_space = Some(std::mem::transmute::<pfn::VoidFunction, pfn::LocateSpace>(
+                (*function).unwrap(),
+            ));
+            *function = Some(std::mem::transmute::<pfn::LocateSpace, pfn::VoidFunction>(
+                xr_locate_space,
+            ));
+        }
+
         openxr_sys::Result::SUCCESS
     }
 }
@@ -290,19 +365,20 @@ unsafe extern "system" fn xr_end_frame(
     unsafe { LAYER.end_frame(session, frame_end_info) }
 }
 
-/*
 unsafe extern "system" fn xr_enumerate_instance_extension_properties(
     layer_name: *const c_char,
     property_capacity_input: u32,
     property_count_output: *mut u32,
     properties: *mut ExtensionProperties,
 ) -> Result {
-    INSTANCE.enumerate_instance_extension_properties(
-        layer_name,
-        property_capacity_input,
-        property_count_output,
-        properties,
-    )
+    unsafe {
+        LAYER.enumerate_instance_extension_properties(
+            layer_name,
+            property_capacity_input,
+            property_count_output,
+            properties,
+        )
+    }
 }
 
 unsafe extern "system" fn xr_get_system_properties(
@@ -310,14 +386,14 @@ unsafe extern "system" fn xr_get_system_properties(
     system_id: SystemId,
     properties: *mut SystemProperties,
 ) -> Result {
-    INSTANCE.get_system_properties(instance, system_id, properties)
+    unsafe { LAYER.get_system_properties(instance, system_id, properties) }
 }
 
 unsafe extern "system" fn xr_suggest_interaction_profile_bindings(
     instance: Instance,
     suggested_bindings: *const InteractionProfileSuggestedBinding,
 ) -> Result {
-    INSTANCE.suggest_interaction_profile_bindings(instance, suggested_bindings)
+    unsafe { LAYER.suggest_interaction_profile_bindings(instance, suggested_bindings) }
 }
 
 unsafe extern "system" fn xr_create_action_space(
@@ -325,7 +401,7 @@ unsafe extern "system" fn xr_create_action_space(
     create_info: *const ActionSpaceCreateInfo,
     space: *mut Space,
 ) -> Result {
-    INSTANCE.create_action_space(session, create_info, space)
+    unsafe { LAYER.create_action_space(session, create_info, space) }
 }
 
 unsafe extern "system" fn xr_get_action_state_pose(
@@ -333,7 +409,7 @@ unsafe extern "system" fn xr_get_action_state_pose(
     get_info: *const ActionStateGetInfo,
     state: *mut ActionStatePose,
 ) -> Result {
-    INSTANCE.get_action_state_pose(session, get_info, state)
+    unsafe { LAYER.get_action_state_pose(session, get_info, state) }
 }
 
 unsafe extern "system" fn xr_locate_space(
@@ -342,9 +418,10 @@ unsafe extern "system" fn xr_locate_space(
     time: Time,
     location: *mut SpaceLocation,
 ) -> Result {
-    INSTANCE.locate_space(space, base_space, time, location)
+    unsafe { LAYER.locate_space(space, base_space, time, location) }
 }
 
+/*
 unsafe extern "system" fn xr_locate_views(
     session: Session,
     view_locate_info: *const ViewLocateInfo,

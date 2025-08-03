@@ -79,7 +79,7 @@ pub fn merge_eyes(
             }
 
             // // Makes the result jittery, probably cause of not synchronous data from L and R cams.
-            
+
             // // Clamp convergence point at infinity.
             // if l_eye_state.yaw < r_eye_state.yaw {
             //     let avg_yaw = (l_eye_state.yaw + r_eye_state.yaw) / 2.0;
@@ -100,7 +100,6 @@ pub fn merge_eyes(
             //         r_eye_state.yaw = avg_yaw + max_angle;
             //     }
             // }
-            
 
             tx.broadcast_direct((l_eye_state, r_eye_state))
                 .await

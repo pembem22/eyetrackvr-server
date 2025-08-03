@@ -22,7 +22,7 @@ impl CameraTexture {
         renderer: &mut imgui_wgpu::Renderer,
         label: Option<&str>,
     ) -> CameraTexture {
-        let texture_config= imgui_wgpu::TextureConfig {
+        let texture_config = imgui_wgpu::TextureConfig {
             size: wgpu::Extent3d {
                 width: CAMERA_FRAME_SIZE,
                 height: CAMERA_FRAME_SIZE,
@@ -52,9 +52,15 @@ impl CameraTexture {
         queue: &wgpu::Queue,
         renderer: &mut imgui_wgpu::Renderer,
     ) {
-        let frame = match rx.try_recv() {
-            Ok(frame) => frame,
-            Err(_) => return,
+        let frame = loop {
+            match rx.try_recv() {
+                Ok(frame) => break frame,
+                Err(err) => match err {
+                    async_broadcast::TryRecvError::Overflowed(_) => continue,
+                    async_broadcast::TryRecvError::Closed
+                    | async_broadcast::TryRecvError::Empty => return,
+                },
+            };
         };
 
         let image = DynamicImage::from(frame.decoded.clone()).into_rgba8();
@@ -67,7 +73,10 @@ impl CameraTexture {
         );
 
         // TODO: why crashes here on Android?
-        self.last_delta = frame.timestamp.duration_since(self.last_timestamp).unwrap_or_default();
+        self.last_delta = frame
+            .timestamp
+            .duration_since(self.last_timestamp)
+            .unwrap_or_default();
         self.last_timestamp = frame.timestamp;
 
         self.update_fps();

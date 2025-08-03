@@ -1,9 +1,5 @@
 use core::ffi::c_void;
-use std::{
-    ffi::c_char,
-    ptr,
-    time::Instant,
-};
+use std::{ffi::c_char, ptr, time::Instant};
 
 use glow::HasContext;
 use pollster::block_on;
