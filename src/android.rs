@@ -76,10 +76,10 @@ fn enum_and_open_devices(env: &JNIEnv, app_context: JObject) -> jni::errors::Res
 }
 */
 
+use crate::android_serial_watcher::start_serial_watcher;
+use crate::{app::App, camera_server::start_camera_server};
 use futures::future::try_join_all;
 use tokio::task::JoinHandle;
-
-use crate::{app::App, camera_server::start_camera_server};
 
 use crate::window_android::start_ui;
 
@@ -104,6 +104,7 @@ pub fn main() {
 fn start_android_tasks(app: &App) -> Vec<JoinHandle<()>> {
     let mut tasks = Vec::new();
 
+    /*
     let (l_camera, r_camera, f_camera) = app.start_cameras(
         "http://localhost:8080/30:30:F9:33:DD:7C".to_string(),
         "http://localhost:8080/30:30:F9:17:F3:C4".to_string(),
@@ -112,6 +113,7 @@ fn start_android_tasks(app: &App) -> Vec<JoinHandle<()>> {
     tasks.push(l_camera);
     tasks.push(r_camera);
     tasks.push(f_camera);
+    */
 
     // HTTP server to mirror the cameras
     tasks.push(start_camera_server(
@@ -119,6 +121,12 @@ fn start_android_tasks(app: &App) -> Vec<JoinHandle<()>> {
         app.r_cam_rx.clone(),
         app.f_cam_rx.clone(),
     ));
+
+    tasks.push(start_serial_watcher(std::collections::HashMap::from([
+        ("30:30:F9:33:DD:7C".to_string(), app.l_cam_tx.clone()),
+        ("30:30:F9:17:F3:C4".to_string(), app.r_cam_tx.clone()),
+        ("DC:DA:0C:18:32:34".to_string(), app.f_cam_tx.clone()),
+    ])));
 
     tasks.push(start_ui(crate::ui::AppRendererContext {
         l_rx: app.l_cam_rx.activate_cloned(),

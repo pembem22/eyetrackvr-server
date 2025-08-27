@@ -226,8 +226,13 @@ impl OpenXRLayer {
 
             println!("loader_init_info_android: {loader_init_info_android:?}");
 
-            self.application_context = loader_init_info_android.application_context;
-            self.application_vm = loader_init_info_android.application_vm;
+            ndk_context::initialize_android_context(
+                loader_init_info_android.application_vm,
+                loader_init_info_android.application_context,
+            );
+
+            // self.application_context = loader_init_info_android.application_context;
+            // self.application_vm = loader_init_info_android.application_vm;
 
             // From the OpenXR specs:
             // If the xrInitializeLoaderKHR function is discovered through the manifest,

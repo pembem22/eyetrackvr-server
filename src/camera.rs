@@ -29,7 +29,7 @@ pub enum Eye {
     R,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Frame {
     pub raw_data: Vec<u8>,
     pub decoded: RgbImage,

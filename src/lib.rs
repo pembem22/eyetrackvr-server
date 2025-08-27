@@ -25,6 +25,8 @@ pub mod desktop;
 
 #[cfg(feature = "android")]
 mod android;
+#[cfg(feature = "android")]
+mod android_serial_watcher;
 #[cfg(feature = "openxr-api-layer")]
 mod openxr_layer;
 
