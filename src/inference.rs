@@ -52,20 +52,21 @@ pub fn eye_inference(
         let handle = Handle::current();
 
         loop {
-            let frame = handle.block_on(async {
-                match rx.recv_direct().await {
-                    Ok(frame) => Some(frame),
-                    Err(e) => {
-                        match e {
-                            RecvError::Overflowed(skipped) => {
-                                println!("Skipped {skipped} frames")
-                            }
-                            RecvError::Closed => println!("Channel closed"),
-                        };
-                        None
-                    }
+            let frame = match rx.recv_blocking() {
+                Ok(frame) => Some(frame),
+                Err(e) => {
+                    match e {
+                        RecvError::Overflowed(skipped) => {
+                            println!("Skipped {skipped} frames")
+                        }
+                        RecvError::Closed => {
+                            println!("Channel closed");
+                            break;
+                        }
+                    };
+                    None
                 }
-            });
+            };
 
             let frame = match frame {
                 Some(frame) => frame,
@@ -101,15 +102,12 @@ pub fn eye_inference(
             let output = output.try_extract_tensor::<f32>().unwrap();
             let output = output.1;
 
-            let _ = handle.block_on(async {
-                tx.broadcast_direct(EyeState {
-                    pitch: output[0],
-                    yaw: output[1] * if eye == Eye::R { -1.0 } else { 1.0 },
-                    eyelid: output[2],
-                    timestamp: frame.timestamp,
-                })
-                .await
-            });
+            tx.broadcast_blocking(EyeState {
+                pitch: output[0],
+                yaw: output[1] * if eye == Eye::R { -1.0 } else { 1.0 },
+                eyelid: output[2],
+                timestamp: frame.timestamp,
+            }).unwrap();
         }
     })
 }
