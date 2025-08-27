@@ -14,6 +14,10 @@
       {
         "name": "XR_EXT_eye_gaze_interaction",
         "extension_version": "1"
+      },
+      {
+        "name": "XR_FB_face_tracking2",
+        "extension_version": "1"
       }
     ],
     "disable_environment": "DISABLE_XR_APILAYER_ETVR"

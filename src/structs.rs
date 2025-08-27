@@ -13,7 +13,7 @@ impl Default for EyeState {
         Self {
             pitch: 0.0,
             yaw: 0.0,
-            eyelid: 1.0,
+            eyelid: 0.75,
             timestamp: SystemTime::UNIX_EPOCH,
         }
     }

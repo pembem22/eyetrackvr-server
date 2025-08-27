@@ -14,7 +14,7 @@ use openxr_sys::{
     SwapchainUsageFlags, Vector3f, pfn,
 };
 
-use openxr::{self as xr};
+use openxr::{self as xr, FaceConfidence2FB, FaceExpression2FB};
 
 #[cfg(feature = "android")]
 use openxr_sys::LoaderInitInfoAndroidKHR;
@@ -28,10 +28,16 @@ struct Extension {
     version: u32,
 }
 
-const ADVERTISED_EXTENSIONS: &[Extension] = &[Extension {
-    name: "XR_EXT_eye_gaze_interaction",
-    version: 1,
-}];
+const ADVERTISED_EXTENSIONS: &[Extension] = &[
+    Extension {
+        name: "XR_EXT_eye_gaze_interaction",
+        version: 1,
+    },
+    Extension {
+        name: "XR_FB_face_tracking2",
+        version: 1,
+    },
+];
 
 #[derive(Default, Debug)]
 pub struct RenderSignal {
@@ -480,6 +486,13 @@ impl OpenXRLayer {
                 property.supports_eye_gaze_interaction = true.into();
             }
 
+            if property.ty == xr_sys::StructureType::SYSTEM_FACE_TRACKING_PROPERTIES2_FB {
+                let property =
+                    unsafe { &mut *(property_ptr as *mut xr_sys::SystemFaceTrackingProperties2FB) };
+                property.supports_visual_face_tracking = true.into();
+                property.supports_audio_face_tracking = false.into();
+            }
+
             property_ptr = property.next;
         }
 
@@ -611,7 +624,7 @@ impl OpenXRLayer {
                 // False if there's no bridge yet.
                 .is_some_and(|mut bridge| {
                     // False if there has been no data yet.
-                    bridge.get_gaze().is_some_and(|gaze| {
+                    bridge.get_openxr_gaze().is_some_and(|gaze| {
                         gaze.latest_timestamp().elapsed().unwrap()
                             < std::time::Duration::from_millis(50)
                     })
@@ -681,7 +694,7 @@ impl OpenXRLayer {
                 .expect("requested for gaze, but bridge was not initialized yet")
                 .lock()
                 .expect("failed to lock OpenXR output bridge")
-                .get_gaze()
+                .get_openxr_gaze()
                 .expect("requested for gaze, but no data has arrived yet");
 
             use quaternion_core as quat;
@@ -725,6 +738,124 @@ impl OpenXRLayer {
 
             xr_sys::Result::SUCCESS
         }
+    }
+
+    pub unsafe fn create_face_tracker2(
+        &self,
+        _session: xr_sys::Session,
+        create_info: *const xr_sys::FaceTrackerCreateInfo2FB,
+        face_tracker: *mut xr_sys::FaceTracker2FB,
+    ) -> xr_sys::Result {
+        unsafe {
+            println!("--> create_face_tracker2 {:#?}", *create_info);
+
+            *face_tracker = xr_sys::FaceTracker2FB::from_raw(1);
+        }
+        xr_sys::Result::SUCCESS
+    }
+
+    pub unsafe fn destroy_face_tracker2(
+        &self,
+        face_tracker: xr_sys::FaceTracker2FB,
+    ) -> xr_sys::Result {
+        println!("--> destroy_face_tracker2 {:#?}", face_tracker);
+        xr_sys::Result::SUCCESS
+    }
+
+    pub unsafe fn get_face_expression_weights2(
+        &self,
+        _face_tracker: xr_sys::FaceTracker2FB,
+        expression_info: *const xr_sys::FaceExpressionInfo2FB,
+        expression_weights: *mut xr_sys::FaceExpressionWeights2FB,
+    ) -> xr_sys::Result {
+        unsafe {
+            let expression_info = &*expression_info;
+            let expression_weights = &mut *expression_weights;
+
+            if expression_weights.weight_count != FaceExpression2FB::COUNT.into_raw() as u32 {
+                return xr_sys::Result::ERROR_VALIDATION_FAILURE;
+            }
+            let face_expressions = std::slice::from_raw_parts_mut(
+                expression_weights.weights,
+                FaceExpression2FB::COUNT.into_raw() as usize,
+            );
+
+            if expression_weights.confidence_count != FaceConfidence2FB::COUNT.into_raw() as u32 {
+                return xr_sys::Result::ERROR_VALIDATION_FAILURE;
+            }
+            let face_confidences = std::slice::from_raw_parts_mut(
+                expression_weights.confidences,
+                FaceConfidence2FB::COUNT.into_raw() as usize,
+            );
+
+            // Very confident...
+            face_confidences.fill(1.0);
+
+            // Retrieve the gaze data.
+            let eyes_state = OPENXR_OUTPUT_BRIDGE
+                .get()
+                .expect("requested for gaze, but bridge was not initialized yet")
+                .lock()
+                .expect("failed to lock OpenXR output bridge")
+                .get_state()
+                .expect("requested for gaze, but no data has arrived yet");
+
+            let remap = |value: f32, low1: f32, high1: f32, low2: f32, high2: f32| {
+                (low2 + (value - low1) * (high2 - low2) / (high1 - low1)).clamp(0.0, 1.0)
+            };
+
+            for (i, mut _face_expression) in face_expressions.iter().enumerate() {
+                _face_expression = &match FaceExpression2FB::from_raw(i as i32) {
+                    FaceExpression2FB::UPPER_LID_RAISER_L => {
+                        remap(eyes_state.0.eyelid, 0.75, 1.0, 0.0, 1.0)
+                    }
+                    FaceExpression2FB::UPPER_LID_RAISER_R => {
+                        remap(eyes_state.1.eyelid, 0.75, 1.0, 0.0, 1.0)
+                    }
+
+                    FaceExpression2FB::EYES_CLOSED_L => {
+                        remap(eyes_state.0.eyelid, 0.75, 0.0, 0.0, 1.0)
+                    }
+                    FaceExpression2FB::EYES_CLOSED_R => {
+                        remap(eyes_state.1.eyelid, 0.75, 0.0, 0.0, 1.0)
+                    }
+
+                    FaceExpression2FB::EYES_LOOK_LEFT_L => {
+                        remap(eyes_state.0.yaw, 0.0, -45.0, 0.0, 1.0)
+                    },
+                    FaceExpression2FB::EYES_LOOK_RIGHT_L => {
+                        remap(eyes_state.0.yaw, 0.0, 45.0, 0.0, 1.0)
+                    },
+                    FaceExpression2FB::EYES_LOOK_UP_L => {
+                        remap(eyes_state.0.pitch, 0.0, 45.0, 0.0, 1.0)
+                    },
+                    FaceExpression2FB::EYES_LOOK_DOWN_L => {
+                        remap(eyes_state.0.pitch, 0.0, -45.0, 0.0, 1.0)
+                    },
+
+                    FaceExpression2FB::EYES_LOOK_LEFT_R => {
+                        remap(eyes_state.1.yaw, 0.0, -45.0, 0.0, 1.0)
+                    },
+                    FaceExpression2FB::EYES_LOOK_RIGHT_R => {
+                        remap(eyes_state.1.yaw, 0.0, 45.0, 0.0, 1.0)
+                    },
+                    FaceExpression2FB::EYES_LOOK_UP_R => {
+                        remap(eyes_state.1.pitch, 0.0, 45.0, 0.0, 1.0)
+                    },
+                    FaceExpression2FB::EYES_LOOK_DOWN_R => {
+                        remap(eyes_state.1.pitch, 0.0, -45.0, 0.0, 1.0)
+                    },
+
+                    _ => 0.0,
+                }
+            }
+
+            expression_weights.data_source = xr_sys::FaceTrackingDataSource2FB::VISUAL;
+            expression_weights.is_eye_following_blendshapes_valid = true.into();
+            expression_weights.is_valid = true.into();
+            expression_weights.time = expression_info.time;
+        }
+        xr_sys::Result::SUCCESS
     }
 
     /*

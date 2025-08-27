@@ -14,6 +14,10 @@ use openxr_sys::ActionSpaceCreateInfo;
 use openxr_sys::ActionStateGetInfo;
 use openxr_sys::ActionStatePose;
 use openxr_sys::ExtensionProperties;
+use openxr_sys::FaceExpressionInfo2FB;
+use openxr_sys::FaceExpressionWeights2FB;
+use openxr_sys::FaceTracker2FB;
+use openxr_sys::FaceTrackerCreateInfo2FB;
 use openxr_sys::FrameBeginInfo;
 use openxr_sys::FrameEndInfo;
 use openxr_sys::InteractionProfileSuggestedBinding;
@@ -199,10 +203,19 @@ pub unsafe extern "system" fn xr_get_instance_proc_addr(
 
         let layer = &mut LAYER;
 
-        let result = layer.get_instance_proc_addr.unwrap()(instance, name_ptr, function);
+        const DONT_REQUEST_FN_ADDRESS: [&str; 3] = [
+            "xrCreateFaceTracker2FB",
+            "xrDestroyFaceTracker2FB",
+            "xrGetFaceExpressionWeights2FB",
+        ];
 
-        if result != openxr_sys::Result::SUCCESS {
-            return result;
+        // We don't want to ask for "xrCreateFaceTracker2FB" from runtime, since it doesn't exist.
+        if !DONT_REQUEST_FN_ADDRESS.contains(&api_name.as_str()) {
+            let result = layer.get_instance_proc_addr.unwrap()(instance, name_ptr, function);
+
+            if result != openxr_sys::Result::SUCCESS {
+                return result;
+            }
         }
 
         if api_name == "xrCreateSession" {
@@ -325,6 +338,27 @@ pub unsafe extern "system" fn xr_get_instance_proc_addr(
             ));
         }
 
+        if api_name == "xrCreateFaceTracker2FB" {
+            *function = Some(std::mem::transmute::<
+                pfn::CreateFaceTracker2FB,
+                pfn::VoidFunction,
+            >(xr_create_face_tracker2));
+        }
+
+        if api_name == "xrDestroyFaceTracker2FB" {
+            *function = Some(std::mem::transmute::<
+                pfn::DestroyFaceTracker2FB,
+                pfn::VoidFunction,
+            >(xr_destroy_face_tracker2));
+        }
+
+        if api_name == "xrGetFaceExpressionWeights2FB" {
+            *function = Some(std::mem::transmute::<
+                pfn::GetFaceExpressionWeights2FB,
+                pfn::VoidFunction,
+            >(xr_get_face_expression_weights2));
+        }
+
         openxr_sys::Result::SUCCESS
     }
 }
@@ -419,6 +453,26 @@ unsafe extern "system" fn xr_locate_space(
     location: *mut SpaceLocation,
 ) -> Result {
     unsafe { LAYER.locate_space(space, base_space, time, location) }
+}
+
+unsafe extern "system" fn xr_create_face_tracker2(
+    session: Session,
+    create_info: *const FaceTrackerCreateInfo2FB,
+    face_tracker: *mut FaceTracker2FB,
+) -> Result {
+    unsafe { LAYER.create_face_tracker2(session, create_info, face_tracker) }
+}
+
+unsafe extern "system" fn xr_destroy_face_tracker2(face_tracker: FaceTracker2FB) -> Result {
+    unsafe { LAYER.destroy_face_tracker2(face_tracker) }
+}
+
+unsafe extern "system" fn xr_get_face_expression_weights2(
+    face_tracker: FaceTracker2FB,
+    expression_info: *const FaceExpressionInfo2FB,
+    expression_weights: *mut FaceExpressionWeights2FB,
+) -> Result {
+    unsafe { LAYER.get_face_expression_weights2(face_tracker, expression_info, expression_weights) }
 }
 
 /*
