@@ -7,7 +7,6 @@ use std::{
 use futures::StreamExt;
 
 use hyper::http;
-use image::GenericImageView;
 use nokhwa::{
     pixel_format::RgbFormat,
     utils::{CameraIndex, RequestedFormat, RequestedFormatType},
@@ -97,12 +96,10 @@ impl CameraSource for HttpCameraSource {
                         continue;
                     }
 
-                    let image = image.unwrap().into_rgb8();
-
                     let frame = Frame {
                         timestamp: SystemTime::now(),
                         raw_jpeg_data: Some(buf.to_vec()),
-                        decoded: image,
+                        decoded: image.unwrap().into_rgb8(),
                     };
 
                     dispatcher.dispatch(&frame).await;
@@ -154,17 +151,10 @@ impl CameraSource for UvcCameraSource {
                     continue;
                 }
 
-                let image = image
-                    .unwrap()
-                    .as_rgb8()
-                    .unwrap()
-                    .view(0, 0, 240, 240)
-                    .to_image();
-
                 let frame = Frame {
                     timestamp: SystemTime::now(),
                     raw_jpeg_data: Some(Vec::from(frame_raw)),
-                    decoded: image,
+                    decoded: image.unwrap().into_rgb8(),
                 };
 
                 dispatcher.dispatch(&frame).block_on();

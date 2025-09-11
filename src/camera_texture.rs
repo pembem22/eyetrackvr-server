@@ -63,13 +63,19 @@ impl CameraTexture {
             };
         };
 
-        let image = DynamicImage::from(frame.decoded.clone()).into_rgba8();
+        let image = DynamicImage::from(frame.decoded.clone())
+            .resize_exact(
+                CAMERA_FRAME_SIZE,
+                CAMERA_FRAME_SIZE,
+                image::imageops::FilterType::Lanczos3,
+            )
+            .into_rgba8();
 
         renderer.textures.get(self.texture_id).unwrap().write(
             queue,
             &image,
-            frame.decoded.width(),
-            frame.decoded.height(),
+            CAMERA_FRAME_SIZE,
+            CAMERA_FRAME_SIZE,
         );
 
         // TODO: why crashes here on Android?
