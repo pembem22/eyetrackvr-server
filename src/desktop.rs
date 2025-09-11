@@ -59,6 +59,11 @@ struct Args {
 }
 
 pub async fn desktop_main() {
+    nokhwa::query(nokhwa::utils::ApiBackend::Auto)
+        .unwrap()
+        .iter()
+        .for_each(|cam| println!("{:#?}", cam));
+
     let args = Args::parse();
 
     let app = App::new();
