@@ -1,3 +1,4 @@
+use std::fmt::Debug;
 use std::{
     io::Cursor,
     time::{Duration, SystemTime},
@@ -23,6 +24,7 @@ const HTTP_CONNECTION_TIMEOUT: Duration = Duration::from_secs(1);
 
 pub const CAMERA_FRAME_SIZE: u32 = 240;
 
+// TODO: Move to structs.rs?
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Eye {
     L,
@@ -31,7 +33,7 @@ pub enum Eye {
 
 #[derive(Clone, Debug)]
 pub struct Frame {
-    pub raw_data: Vec<u8>,
+    pub raw_jpeg_data: Option<Vec<u8>>,
     pub decoded: RgbImage,
     pub timestamp: SystemTime,
 }
@@ -41,6 +43,7 @@ pub struct Camera {
     sender: Sender<Frame>,
 }
 
+// TODO: Have some kind of CameraManager that will auto-map cameras to respective data streams.
 impl Camera {
     pub fn new(eye: Eye, sender: Sender<Frame>) -> Camera {
         Camera { eye, sender }
@@ -49,8 +52,8 @@ impl Camera {
     pub fn start(&self, path: String) -> JoinHandle<()> {
         if path.starts_with("COM") {
             self.connect_serial(path)
-        } else if path.starts_with("UVC") {
-            self.connect_uvc(path.strip_prefix("UVC").unwrap().parse().unwrap())
+        } else if path.starts_with("uvc://") {
+            self.connect_uvc(path.strip_prefix("uvc://").unwrap().parse().unwrap())
         } else {
             self.connect_http(path)
         }
@@ -161,7 +164,7 @@ impl Camera {
 
                         let new_frame = Frame {
                             timestamp: SystemTime::now(),
-                            raw_data: buf,
+                            raw_jpeg_data: Some(buf),
                             decoded: image,
                         };
 
@@ -189,7 +192,6 @@ impl Camera {
                 }
                 reconnect = true;
 
-                hyper::Client::new();
                 let client = hyper::Client::builder()
                     .pool_idle_timeout(HTTP_CONNECTION_TIMEOUT)
                     .build_http::<hyper::Body>();
@@ -241,7 +243,7 @@ impl Camera {
 
                     let new_frame = Frame {
                         timestamp: SystemTime::now(),
-                        raw_data: buf.to_vec(),
+                        raw_jpeg_data: Some(buf.to_vec()),
                         decoded: image,
                     };
 
@@ -291,7 +293,7 @@ impl Camera {
 
                 let new_frame = Frame {
                     timestamp: SystemTime::now(),
-                    raw_data: Vec::from(frame_raw),
+                    raw_jpeg_data: Some(Vec::from(frame_raw)),
                     decoded: image,
                 };
 

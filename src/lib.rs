@@ -1,6 +1,9 @@
 mod app;
 mod camera;
+mod camera_manager;
+mod camera_dispatcher;
 mod camera_server;
+mod camera_sources;
 mod frame_server;
 mod structs;
 
@@ -11,6 +14,7 @@ mod ui;
 #[cfg(all(feature = "gui", target_os = "windows"))]
 mod window_desktop;
 
+#[cfg(all(feature = "gui", target_os = "android"))]
 mod window_android;
 
 #[cfg(feature = "inference")]

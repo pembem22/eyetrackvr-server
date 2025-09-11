@@ -1,3 +1,5 @@
+use std::io::Cursor;
+
 use async_broadcast::{InactiveReceiver, Receiver};
 use hyper::http;
 use hyper::{
@@ -5,12 +7,11 @@ use hyper::{
     body::Bytes,
     service::{make_service_fn, service_fn},
 };
+use image::codecs::jpeg::JpegEncoder;
 use tokio::task::JoinHandle;
 use tokio_stream::StreamExt;
 
 use crate::camera::Frame;
-
-type BoxedError = Box<dyn std::error::Error + Send + Sync>;
 
 const PART_BOUNDARY: &str = "123456789000000000000987654321";
 
@@ -19,7 +20,21 @@ fn serve(
     frame_stream: Receiver<Frame>,
 ) -> Result<Response<Body>, http::Error> {
     let stream = frame_stream.map(|frame| {
-        let body = Bytes::from(frame.raw_data);
+        let body = Bytes::from(match frame.raw_jpeg_data {
+            // Send the source JPEG data if it's available.
+            Some(raw_jpeg_data) => raw_jpeg_data,
+            
+            // Otherwise encode the image into JPEG.
+            None => {
+                let vec = Vec::with_capacity(8192);
+                let mut cursor = Cursor::new(vec);
+
+                JpegEncoder::new(&mut cursor)
+                    .encode_image(&frame.decoded)
+                    .unwrap();
+                cursor.into_inner()
+            }
+        });
 
         let mut headers = HeaderMap::new();
         headers.append(http::header::CONTENT_TYPE, "image/jpeg".parse().unwrap());

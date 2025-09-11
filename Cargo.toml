@@ -11,6 +11,7 @@ crate-type = ["rlib", "cdylib"]
 [dependencies]
 android-usbser = { version = "0.2.3", optional = true }
 async-broadcast = "0.7.0"
+async-trait = "0.1.89"
 chrono = "0.4.33"
 clap = { version = "4.5.4", features = ["derive"] }
 const_format = "0.2.34"
@@ -52,8 +53,8 @@ winit = { version = "0.30.11", optional = true }
 imgui-winit-support = { version = "0.13.0", optional = true }
 
 [features]
-# TODO: look into VSCode Rust extension configuration to avoid enabling everything by default.
-default = ["inference", "gui", "openxr-api-layer", "android", "desktop"]
+# TODO: look into VSCode Rust extension configuration to define OpenXR layer/desktop/Android app/etc profiles.
+default = ["inference", "gui", "desktop"]
 inference = ["dep:ort", "dep:ort-sys"]
 gui = ["dep:imgui", "dep:imgui-wgpu", "dep:imgui-winit-support", "dep:wgpu", "dep:winit"]
 openxr-api-layer = ["dep:openxr-sys"]

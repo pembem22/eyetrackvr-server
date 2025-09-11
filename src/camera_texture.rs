@@ -68,8 +68,8 @@ impl CameraTexture {
         renderer.textures.get(self.texture_id).unwrap().write(
             queue,
             &image,
-            CAMERA_FRAME_SIZE,
-            CAMERA_FRAME_SIZE,
+            frame.decoded.width(),
+            frame.decoded.height(),
         );
 
         // TODO: why crashes here on Android?

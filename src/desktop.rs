@@ -1,3 +1,5 @@
+use crate::camera_dispatcher::{MonoCameraDispatcher, StereoCameraDispatcher};
+use crate::camera_manager;
 use crate::frame_server::start_frame_server;
 
 #[cfg(feature = "inference")]
@@ -20,16 +22,20 @@ use crate::{app::App, camera::*};
 #[command(version, about, long_about = None)]
 struct Args {
     /// Left camera URL
-    #[arg(short = 'l', default_value = "http://openiristracker_l.local/")]
-    l_camera_url: String,
+    #[arg(short = 'l')]
+    l_camera_url: Option<String>,
 
     /// Right camera URL
-    #[arg(short = 'r', default_value = "http://openiristracker_r.local/")]
-    r_camera_url: String,
+    #[arg(short = 'r')]
+    r_camera_url: Option<String>,
 
     /// Face camera URL
-    #[arg(short = 'f', default_value = "http://openiristracker_face.local/")]
-    f_camera_url: String,
+    #[arg(short = 'f')]
+    f_camera_url: Option<String>,
+
+    /// Combined left and right eyes camera URL
+    #[arg(long = "lr")]
+    lr_camera_url: Option<String>,
 
     /// Enable inference
     #[arg(short = 'I')]
@@ -66,15 +72,53 @@ fn start_desktop_tasks(args: &Args, app: &App) -> Vec<JoinHandle<()>> {
     let mut tasks = Vec::new();
 
     // Connect to the cameras
+    if let Some(lr_camera_url) = &args.lr_camera_url {
+        if args.l_camera_url.is_some() || args.r_camera_url.is_some() {
+            println!(
+                "Both combined (--lr) and at least one individual (-l or -r) cameras defined, this is not supported."
+            );
+            std::process::exit(1);
+        }
 
-    let (l_camera, r_camera, f_camera) = app.start_cameras(
-        args.l_camera_url.clone(),
-        args.r_camera_url.clone(),
-        args.f_camera_url.clone(),
-    );
-    tasks.push(l_camera);
-    tasks.push(r_camera);
-    tasks.push(f_camera);
+        // I have no idea what I'm doing here.
+
+        let camera_source = camera_manager::camera_source_from_uri(lr_camera_url.to_string());
+        match camera_source {
+            Some(camera_source) => tasks.push(camera_source.run(Box::new(
+                StereoCameraDispatcher::new(app.l_cam_tx.clone(), app.r_cam_tx.clone()),
+            ))),
+            None => eprintln!("Invalid camera URI {lr_camera_url}"),
+        }
+    }
+
+    // TODO: Deduplicate
+
+    if let Some(l_camera_url) = &args.l_camera_url {
+        let camera_source = camera_manager::camera_source_from_uri(l_camera_url.to_string());
+        match camera_source {
+            Some(camera_source) => tasks
+                .push(camera_source.run(Box::new(MonoCameraDispatcher::new(app.l_cam_tx.clone())))),
+            None => eprintln!("Invalid camera URI {l_camera_url}"),
+        }
+    }
+
+    if let Some(r_camera_url) = &args.r_camera_url {
+        let camera_source = camera_manager::camera_source_from_uri(r_camera_url.to_string());
+        match camera_source {
+            Some(camera_source) => tasks
+                .push(camera_source.run(Box::new(MonoCameraDispatcher::new(app.r_cam_tx.clone())))),
+            None => eprintln!("Invalid camera URI {r_camera_url}"),
+        }
+    }
+
+    if let Some(f_camera_url) = &args.f_camera_url {
+        let camera_source = camera_manager::camera_source_from_uri(f_camera_url.to_string());
+        match camera_source {
+            Some(camera_source) => tasks
+                .push(camera_source.run(Box::new(MonoCameraDispatcher::new(app.f_cam_tx.clone())))),
+            None => eprintln!("Invalid camera URI {f_camera_url}"),
+        }
+    }
 
     // Save dataset
 

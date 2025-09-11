@@ -118,7 +118,7 @@ pub fn start_frame_server(l_rx: Receiver<Frame>, r_rx: Receiver<Frame>) -> JoinH
                                         .await
                                         .unwrap();
 
-                                    file.write_all(&frame.raw_data).await.unwrap();
+                                    file.write_all(frame.raw_jpeg_data.as_ref().expect("only single-camera MJPEG sources are supported to save images from so far")).await.unwrap();
                                 }
                             }
 

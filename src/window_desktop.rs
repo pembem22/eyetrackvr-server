@@ -55,19 +55,6 @@ impl AppWindow {
     }
 }
 
-impl AppWindow {
-    pub(crate) fn new(renderer_context: AppRendererContext) -> Self {
-        AppWindow {
-            window: None,
-
-            paused: false,
-
-            renderer: None,
-            renderer_context,
-        }
-    }
-}
-
 impl AppWindowContainer {
     fn setup_gpu(event_loop: &ActiveEventLoop) -> Self {
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
