@@ -73,5 +73,7 @@ ort = { git = "https://github.com/pembem22/ort", branch = "main" }
 ort-sys = { git = "https://github.com/pembem22/ort", branch = "main" }
 # Add errno to Fault error
 nusb = { git = "https://github.com/pembem22/nusb", branch = "v0.1" }
+# Debugging BSB 2e camera
+nokhwa = { git = "https://github.com/pembem22/nokhwa", branch = "0.10" }
 
 
