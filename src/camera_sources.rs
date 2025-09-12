@@ -7,6 +7,7 @@ use std::{
 use futures::StreamExt;
 
 use hyper::http;
+use nokhwa::utils::CameraFormat;
 use nokhwa::{
     pixel_format::RgbFormat,
     utils::{CameraIndex, RequestedFormat, RequestedFormatType},
@@ -127,11 +128,13 @@ impl CameraSource for UvcCameraSource {
 
         let future = move || {
             let index = CameraIndex::Index(uvc_index);
-            let requested =
-                RequestedFormat::new::<RgbFormat>(RequestedFormatType::AbsoluteHighestFrameRate);
+            let requested = RequestedFormat::new::<RgbFormat>(RequestedFormatType::Exact(
+                CameraFormat::new_from(320, 240, nokhwa::utils::FrameFormat::MJPEG, 120),
+            ));
             println!("Requested format: {requested:?}");
             let mut camera = nokhwa::Camera::new(index, requested).unwrap();
 
+            // Docs say this is required, but not calling it also works lmao whatever, that lib is cooked.
             camera.open_stream().unwrap();
 
             println!(
