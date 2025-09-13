@@ -4,7 +4,6 @@ use ort::{
     session::{Session, builder::GraphOptimizationLevel},
     value::TensorRef,
 };
-use tokio::runtime::Handle;
 use tokio::task::JoinHandle;
 
 use crate::camera::{Eye, Frame};
@@ -48,8 +47,6 @@ pub fn eye_inference(
             }
         }
         .unwrap();
-
-        let handle = Handle::current();
 
         loop {
             let frame = match rx.recv_blocking() {

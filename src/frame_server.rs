@@ -3,6 +3,7 @@ use std::time::SystemTime;
 use async_broadcast::Receiver;
 use futures::{SinkExt, future::join_all};
 use serde_json::Value;
+use smallvec::{SmallVec, smallvec};
 use tokio::{
     fs::{self, create_dir_all},
     io::AsyncWriteExt,
@@ -52,38 +53,39 @@ pub fn start_frame_server(l_rx: Receiver<Frame>, r_rx: Receiver<Frame>) -> JoinH
                                 }
                             };
 
-                            let mut cameras: Vec<Receiver<Frame>> = Vec::new();
-                            let mut letters = Vec::new();
+                            let mut cameras: SmallVec<[(Receiver<Frame>, char); 2]> = smallvec![];
                             if json.get("l").is_some() {
-                                cameras.push(l_rx.activate_cloned());
-                                letters.push('L');
+                                cameras.push((l_rx.activate_cloned(), 'L'));
                             }
                             if json.get("r").is_some() {
-                                cameras.push(r_rx.activate_cloned());
-                                letters.push('R');
+                                cameras.push((r_rx.activate_cloned(), 'R'));
                             }
 
                             for _ in 0..3 {
                                 // Await for a frame from for each eye.
                                 let mut frames =
-                                    join_all(cameras.iter_mut().map(|c| c.recv())).await;
+                                    join_all(cameras.iter_mut().map(|(rx, _)| rx.recv())).await;
 
-                                // Grab new frames if we got some new ones while awaiting above or skip overflow error.
-                                for (i, camera) in cameras.iter_mut().enumerate() {
-                                    if let Ok(frame) = camera.try_recv() {
-                                        frames[i] = Ok(frame)
+                                // Add the camera letters back.
+                                let mut frames = frames
+                                    .iter_mut()
+                                    .zip(cameras.iter().map(|(_, letter)| letter));
+
+                                // Check for frame receive errors.
+                                if frames.any(|(frame, letter)| {
+                                    if let Err(err) = frame {
+                                        eprintln!("Failed to get frame {letter} for a save: {err}");
+                                        true
+                                    } else {
+                                        false
                                     }
-                                }
-
-                                if frames.iter().any(|frame| frame.is_err()) {
-                                    println!("Failed to get frames for a save");
+                                }) {
                                     continue;
                                 }
 
-                                let frames: Vec<_> = frames
-                                    .iter_mut()
-                                    .map(|frame| frame.as_mut().unwrap())
-                                    .collect();
+                                // After above, unwrap all of the frames.
+                                let frames =
+                                    frames.map(|(frame, letter)| (frame.as_mut().unwrap(), letter));
 
                                 let timestamp: chrono::DateTime<chrono::Local> =
                                     SystemTime::now().into();
@@ -104,11 +106,11 @@ pub fn start_frame_server(l_rx: Receiver<Frame>, r_rx: Receiver<Frame>) -> JoinH
                                     .unwrap();
                                 file.write_all(bytes.as_bytes()).await.unwrap();
 
-                                for (i, frame) in frames.iter().enumerate() {
+                                for (frame, letter) in frames {
                                     let file_path = format!(
                                         "./images/{}_{}.jpg",
                                         timestamp.format("%Y-%m-%d_%H-%M-%S%.3f"),
-                                        letters[i]
+                                        letter
                                     );
 
                                     let mut file = fs::OpenOptions::new()
@@ -118,7 +120,7 @@ pub fn start_frame_server(l_rx: Receiver<Frame>, r_rx: Receiver<Frame>) -> JoinH
                                         .await
                                         .unwrap();
 
-                                    file.write_all(frame.raw_jpeg_data.as_ref().expect("only single-camera MJPEG sources are supported to save images from so far")).await.unwrap();
+                                    file.write_all(&frame.as_jpeg_bytes()).await.unwrap();
                                 }
                             }
 

@@ -7,6 +7,7 @@ use std::{
 use async_broadcast::Sender;
 use hex_literal::hex;
 use hyper::http;
+use image::codecs::jpeg::JpegEncoder;
 use image::{GenericImageView, RgbImage};
 use nokhwa::{
     pixel_format::RgbFormat,
@@ -36,6 +37,22 @@ pub struct Frame {
     pub raw_jpeg_data: Option<Vec<u8>>,
     pub decoded: RgbImage,
     pub timestamp: SystemTime,
+}
+
+impl<'a> Frame {
+    pub fn as_jpeg_bytes(&mut self) -> Vec<u8> {
+        if let None = self.raw_jpeg_data {
+            let vec = Vec::with_capacity(8192);
+            let mut cursor = Cursor::new(vec);
+
+            JpegEncoder::new(&mut cursor)
+                .encode_image(&self.decoded)
+                .unwrap();
+            self.raw_jpeg_data = Some(cursor.into_inner());
+        }
+
+        self.raw_jpeg_data.clone().unwrap()
+    }
 }
 
 pub struct Camera {

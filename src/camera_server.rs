@@ -19,22 +19,8 @@ fn serve(
     _req: Request<Body>,
     frame_stream: Receiver<Frame>,
 ) -> Result<Response<Body>, http::Error> {
-    let stream = frame_stream.map(|frame| {
-        let body = Bytes::from(match frame.raw_jpeg_data {
-            // Send the source JPEG data if it's available.
-            Some(raw_jpeg_data) => raw_jpeg_data,
-            
-            // Otherwise encode the image into JPEG.
-            None => {
-                let vec = Vec::with_capacity(8192);
-                let mut cursor = Cursor::new(vec);
-
-                JpegEncoder::new(&mut cursor)
-                    .encode_image(&frame.decoded)
-                    .unwrap();
-                cursor.into_inner()
-            }
-        });
+    let stream = frame_stream.map(|mut frame| {
+        let body = Bytes::from(frame.as_jpeg_bytes());
 
         let mut headers = HeaderMap::new();
         headers.append(http::header::CONTENT_TYPE, "image/jpeg".parse().unwrap());
