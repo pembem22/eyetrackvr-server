@@ -18,12 +18,38 @@ use tokio::task::JoinHandle;
 use crate::camera::Frame;
 use crate::camera_dispatcher::CameraDispatcher;
 
-const HTTP_CONNECTION_TIMEOUT: Duration = Duration::from_secs(1);
+#[derive(Clone, Debug)]
+struct FpsCounter {
+    last_second: SystemTime,
+    frames_since_last_second: u32,
+}
+
+impl FpsCounter {
+    fn new() -> Self {
+        Self {
+            last_second: SystemTime::now(),
+            frames_since_last_second: 0,
+        }
+    }
+
+    fn update_fps(&mut self) {
+        let now = SystemTime::now();
+        if now.duration_since(self.last_second).unwrap().as_secs() > 0 {
+            println!("FPS: {}", self.frames_since_last_second);
+
+            self.last_second = now;
+            self.frames_since_last_second = 0;
+        }
+
+        self.frames_since_last_second += 1;
+    }
+}
 
 pub trait CameraSource {
     fn run(&self, dispatcher: Box<dyn CameraDispatcher>) -> JoinHandle<()>;
 }
 
+const HTTP_CONNECTION_TIMEOUT: Duration = Duration::from_secs(1);
 #[derive(Clone, Debug)]
 pub struct HttpCameraSource {
     url: String,
@@ -103,7 +129,7 @@ impl CameraSource for HttpCameraSource {
                         decoded: image.unwrap().into_rgb8(),
                     };
 
-                    dispatcher.dispatch(&frame).await;
+                    dispatcher.dispatch(frame).await;
                 }
             }
         };
@@ -125,6 +151,7 @@ impl UvcCameraSource {
 impl CameraSource for UvcCameraSource {
     fn run(&self, dispatcher: Box<dyn CameraDispatcher>) -> JoinHandle<()> {
         let uvc_index = self.uvc_index;
+        let mut fps = FpsCounter::new();
 
         let future = move || {
             let index = CameraIndex::Index(uvc_index);
@@ -160,7 +187,9 @@ impl CameraSource for UvcCameraSource {
                     decoded: image.unwrap().into_rgb8(),
                 };
 
-                dispatcher.dispatch(&frame).block_on();
+                dispatcher.dispatch(frame).block_on();
+
+                fps.update_fps();
             }
         };
         tokio::task::spawn_blocking(future)

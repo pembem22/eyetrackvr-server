@@ -6,22 +6,24 @@ use ort::{
 };
 use tokio::task::JoinHandle;
 
-use crate::camera::{Eye, Frame};
-use crate::structs::EyeState;
+use crate::structs::{EyeGazeState, EyesGazeState};
+use crate::{
+    camera::{Eye, Frame},
+    structs::EyesFrame,
+};
 
 pub const FRAME_CROP_X: u32 = 30;
 pub const FRAME_CROP_Y: u32 = 30;
 pub const FRAME_CROP_W: u32 = 180;
-pub const FRAME_CROP_H: u32 = 180;
+pub const FRAME_CROP_H: u32 = 60;
 pub const FRAME_RESIZE_W: u32 = 64;
 pub const FRAME_RESIZE_H: u32 = 64;
 
 pub fn eye_inference(
-    mut rx: Receiver<Frame>,
+    mut rx: Receiver<EyesFrame>,
+    tx: Sender<EyesGazeState>,
     #[cfg(not(target_os = "android"))] model_path: &str,
     threads: usize,
-    tx: Sender<EyeState>,
-    eye: Eye,
 ) -> JoinHandle<()> {
     #[cfg(not(target_os = "android"))]
     let model_path = model_path.to_owned();
@@ -49,8 +51,8 @@ pub fn eye_inference(
         .unwrap();
 
         loop {
-            let frame = match rx.recv_blocking() {
-                Ok(frame) => Some(frame),
+            let eyes_frame = match rx.recv_blocking() {
+                Ok(eyes_frame) => Some(eyes_frame),
                 Err(e) => {
                     match e {
                         RecvError::Overflowed(skipped) => {
@@ -65,46 +67,69 @@ pub fn eye_inference(
                 }
             };
 
-            let frame = match frame {
-                Some(frame) => frame,
+            let eyes_frame = match eyes_frame {
+                Some(eyes_frame) => eyes_frame,
                 None => continue,
             };
 
-            let mut raw_frame: DynamicImage = image::DynamicImage::ImageRgb8(frame.decoded);
+            let mut run_eye_inference =
+                |frame_view: image::SubImage<&image::ImageBuffer<image::Rgb<u8>, Vec<u8>>>,
+                 is_left: bool| {
+                    // TODO: make it grayscale for a bit less operations? But crashes for some reason so far.
+                    // let mut frame_view = DynamicImage::ImageRgb8(frame_view.to_image()).grayscale();
+                    let mut frame_view = DynamicImage::ImageRgb8(frame_view.to_image());
 
-            if eye == Eye::R {
-                raw_frame = raw_frame.fliph();
-            }
+                    if !is_left {
+                        frame_view = frame_view.fliph();
+                    }
 
-            let cropped_frame =
-                raw_frame.view(FRAME_CROP_X, FRAME_CROP_Y, FRAME_CROP_W, FRAME_CROP_H);
+                    let cropped_frame =
+                        frame_view.view(FRAME_CROP_X, FRAME_CROP_Y, FRAME_CROP_W, FRAME_CROP_H);
 
-            let final_frame = image::imageops::resize(
-                &cropped_frame.to_image(),
-                FRAME_RESIZE_W,
-                FRAME_RESIZE_H,
-                image::imageops::FilterType::Lanczos3,
-            );
+                    let final_frame = image::imageops::resize(
+                        &cropped_frame.to_image(),
+                        FRAME_RESIZE_W,
+                        FRAME_RESIZE_H,
+                        image::imageops::FilterType::Lanczos3,
+                    );
 
-            let array = ndarray::Array::from_iter(final_frame.pixels().map(|p| p[0] as f32));
+                    // Panics that the shape is wrong when using this.
+                    // let array = ndarray::Array::from_vec(final_frame.into_vec());
+                    let array = ndarray::Array::from_iter(final_frame.pixels().map(|p| p[0] as f32));
 
-            let array = array
-                .to_shape((1, FRAME_RESIZE_W as usize, FRAME_RESIZE_H as usize, 1))
-                .unwrap();
+                    let array = array
+                        .to_shape((1, FRAME_RESIZE_W as usize, FRAME_RESIZE_H as usize, 1))
+                        .unwrap();
 
-            let tensor = TensorRef::from_array_view(&array).unwrap();
+                    let tensor = TensorRef::from_array_view(&array).unwrap();
 
-            let outputs = model.run(ort::inputs![tensor]).unwrap();
-            let output = outputs.iter().next().unwrap().1;
-            let output = output.try_extract_tensor::<f32>().unwrap();
-            let output = output.1;
+                    let outputs = model.run(ort::inputs![tensor]).unwrap();
+                    let output = outputs.iter().next().unwrap().1;
+                    let output = output.try_extract_tensor::<f32>().unwrap();
+                    let output = output.1;
 
-            tx.broadcast_blocking(EyeState {
-                pitch: output[0],
-                yaw: output[1] * if eye == Eye::R { -1.0 } else { 1.0 },
-                eyelid: output[2],
-                timestamp: frame.timestamp,
-            }).unwrap();
+                    EyeGazeState {
+                        pitch: output[0],
+                        yaw: output[1] * if is_left { 1.0 } else { -1.0 },
+                        eyelid: output[2],
+                        timestamp: eyes_frame.frame.timestamp,
+                    }
+                };
+
+            let l_eye_result = run_eye_inference(eyes_frame.get_left_view().unwrap(), true);
+            let r_eye_result: EyeGazeState =
+                run_eye_inference(eyes_frame.get_right_view().unwrap(), false);
+
+            // println!("{:#?}", EyesGazeState {
+            //     l: l_eye_result,
+            //     r: r_eye_result,
+            // });
+
+            tx.broadcast_blocking(EyesGazeState {
+                l: l_eye_result,
+                r: r_eye_result,
+            })
+            .unwrap();
         }
     })
 }

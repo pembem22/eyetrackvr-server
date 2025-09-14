@@ -5,50 +5,62 @@ use async_trait::async_trait;
 use futures::future::join_all;
 use image::GenericImageView;
 
-use crate::camera::Frame;
+use crate::{
+    camera::Frame,
+    structs::{EyesFrame, EyesFrameType},
+};
 
 #[async_trait]
 pub trait CameraDispatcher: Debug + Send {
-    async fn dispatch(&self, frame: &Frame);
+    async fn dispatch(&self, frame: Frame);
 }
 
 #[derive(Debug)]
-pub struct StereoCameraDispatcher {
-    l_sender: Sender<Frame>,
-    r_sender: Sender<Frame>,
+pub struct StereoEyesCameraDispatcher {
+    sender: Sender<EyesFrame>,
 }
 
-impl StereoCameraDispatcher {
-    pub fn new(l_sender: Sender<Frame>, r_sender: Sender<Frame>) -> Self {
-        Self { l_sender, r_sender }
+impl StereoEyesCameraDispatcher {
+    pub fn new(sender: Sender<EyesFrame>) -> Self {
+        Self { sender }
     }
 }
 
 #[async_trait]
-impl CameraDispatcher for StereoCameraDispatcher {
-    async fn dispatch(&self, frame: &Frame) {
-        let width = frame.decoded.width();
-        let height = frame.decoded.height();
+impl CameraDispatcher for StereoEyesCameraDispatcher {
+    async fn dispatch(&self, frame: Frame) {
+        self.sender
+            .broadcast_direct(EyesFrame {
+                frame,
+                frame_type: EyesFrameType::Both,
+            })
+            .await
+            .unwrap();
+    }
+}
 
-        let l_frame = Frame {
-            timestamp: frame.timestamp,
-            raw_jpeg_data: None,
-            decoded: frame.decoded.view(0, 0, width / 2, height).to_image(),
-        };
-        let r_frame = Frame {
-            timestamp: frame.timestamp,
-            raw_jpeg_data: None,
-            decoded: frame
-                .decoded
-                .view(width / 2, 0, width / 2, height)
-                .to_image(),
-        };
+#[derive(Debug)]
+pub struct MonoEyeCameraDispatcher {
+    sender: Sender<EyesFrame>,
+    frame_type: EyesFrameType,
+}
 
-        join_all([
-            self.l_sender.broadcast_direct(l_frame),
-            self.r_sender.broadcast_direct(r_frame),
-        ])
-        .await;
+impl MonoEyeCameraDispatcher {
+    pub fn new(frame_type: EyesFrameType, sender: Sender<EyesFrame>) -> Self {
+        Self { sender, frame_type }
+    }
+}
+
+#[async_trait]
+impl CameraDispatcher for MonoEyeCameraDispatcher {
+    async fn dispatch(&self, frame: Frame) {
+        self.sender
+            .broadcast_direct(EyesFrame {
+                frame,
+                frame_type: self.frame_type,
+            })
+            .await
+            .unwrap();
     }
 }
 
@@ -65,7 +77,7 @@ impl MonoCameraDispatcher {
 
 #[async_trait]
 impl CameraDispatcher for MonoCameraDispatcher {
-    async fn dispatch(&self, frame: &Frame) {
-        self.sender.broadcast_direct(frame.clone()).await.unwrap();
+    async fn dispatch(&self, frame: Frame) {
+        self.sender.broadcast_direct(frame).await.unwrap();
     }
 }

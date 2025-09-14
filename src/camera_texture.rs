@@ -46,6 +46,23 @@ impl CameraTexture {
         }
     }
 
+    pub fn upload_texture(
+        &mut self,
+        texture: &[u8],
+        queue: &wgpu::Queue,
+        renderer: &mut imgui_wgpu::Renderer,
+    ) {
+        renderer.textures.get(self.texture_id).unwrap().write(
+            queue,
+            &texture,
+            CAMERA_FRAME_SIZE,
+            CAMERA_FRAME_SIZE,
+        );
+
+        self.update_fps();
+        self.frames_since_last_second += 1;
+    }
+
     pub fn update_texture(
         &mut self,
         rx: &mut Receiver<Frame>,

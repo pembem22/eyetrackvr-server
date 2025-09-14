@@ -1,14 +1,17 @@
-use crate::camera_dispatcher::{MonoCameraDispatcher, StereoCameraDispatcher};
+use crate::camera_dispatcher::{
+    MonoCameraDispatcher, MonoEyeCameraDispatcher, StereoEyesCameraDispatcher,
+};
 use crate::camera_manager;
 use crate::frame_server::start_frame_server;
 
 #[cfg(feature = "inference")]
-use crate::data_processing::{filter_eye, merge_eyes};
+use crate::data_processing::{process_gaze};
 #[cfg(feature = "inference")]
 use crate::inference::eye_inference;
 #[cfg(feature = "inference")]
 use crate::osc_sender::start_osc_sender;
 
+use crate::structs::EyesFrameType;
 #[cfg(feature = "gui")]
 use crate::window_desktop::start_ui;
 
@@ -90,7 +93,7 @@ fn start_desktop_tasks(args: &Args, app: &App) -> Vec<JoinHandle<()>> {
         let camera_source = camera_manager::camera_source_from_uri(lr_camera_url.to_string());
         match camera_source {
             Some(camera_source) => tasks.push(camera_source.run(Box::new(
-                StereoCameraDispatcher::new(app.l_cam_tx.clone(), app.r_cam_tx.clone()),
+                StereoEyesCameraDispatcher::new(app.eye_cam_tx.clone()),
             ))),
             None => eprintln!("Invalid camera URI {lr_camera_url}"),
         }
@@ -101,8 +104,9 @@ fn start_desktop_tasks(args: &Args, app: &App) -> Vec<JoinHandle<()>> {
     if let Some(l_camera_url) = &args.l_camera_url {
         let camera_source = camera_manager::camera_source_from_uri(l_camera_url.to_string());
         match camera_source {
-            Some(camera_source) => tasks
-                .push(camera_source.run(Box::new(MonoCameraDispatcher::new(app.l_cam_tx.clone())))),
+            Some(camera_source) => tasks.push(camera_source.run(Box::new(
+                MonoEyeCameraDispatcher::new(EyesFrameType::Left, app.eye_cam_tx.clone()),
+            ))),
             None => eprintln!("Invalid camera URI {l_camera_url}"),
         }
     }
@@ -110,8 +114,9 @@ fn start_desktop_tasks(args: &Args, app: &App) -> Vec<JoinHandle<()>> {
     if let Some(r_camera_url) = &args.r_camera_url {
         let camera_source = camera_manager::camera_source_from_uri(r_camera_url.to_string());
         match camera_source {
-            Some(camera_source) => tasks
-                .push(camera_source.run(Box::new(MonoCameraDispatcher::new(app.r_cam_tx.clone())))),
+            Some(camera_source) => tasks.push(camera_source.run(Box::new(
+                MonoEyeCameraDispatcher::new(EyesFrameType::Rigth, app.eye_cam_tx.clone()),
+            ))),
             None => eprintln!("Invalid camera URI {r_camera_url}"),
         }
     }
@@ -127,10 +132,7 @@ fn start_desktop_tasks(args: &Args, app: &App) -> Vec<JoinHandle<()>> {
 
     // Save dataset
 
-    tasks.push(start_frame_server(
-        app.l_cam_rx.activate_cloned(),
-        app.r_cam_rx.activate_cloned(),
-    ));
+    tasks.push(start_frame_server(app.eyes_cam_rx.clone()));
 
     // Inference, process the data, output OSC
 
@@ -138,43 +140,22 @@ fn start_desktop_tasks(args: &Args, app: &App) -> Vec<JoinHandle<()>> {
         #[cfg(feature = "inference")]
         {
             tasks.push(eye_inference(
-                app.l_cam_rx.activate_cloned(),
+                app.eyes_cam_rx.activate_cloned(),
+                app.raw_eyes_tx.clone(),
                 &args.model_path,
                 args.threads_per_eye,
-                app.l_raw_eye_tx.clone(),
-                Eye::L,
             ));
-            tasks.push(eye_inference(
-                app.r_cam_rx.activate_cloned(),
-                &args.model_path,
-                args.threads_per_eye,
-                app.r_raw_eye_tx.clone(),
-                Eye::R,
-            ));
-
             // Filter
 
-            tasks.push(filter_eye(
-                app.l_raw_eye_rx.activate_cloned(),
-                app.l_filtered_eye_tx.clone(),
-            ));
-            tasks.push(filter_eye(
-                app.r_raw_eye_rx.activate_cloned(),
-                app.r_filtered_eye_tx.clone(),
-            ));
-
-            // Merge
-
-            tasks.push(merge_eyes(
-                app.l_filtered_eye_rx.activate_cloned(),
-                app.r_filtered_eye_rx.activate_cloned(),
-                app.filtered_eyes_tx.clone(),
+            tasks.push(process_gaze(
+                app.raw_eyes_rx.activate_cloned(),
+                app.combined_eyes_tx.clone(),
             ));
 
             // OSC sender
 
             tasks.push(start_osc_sender(
-                app.filtered_eyes_rx.activate_cloned(),
+                app.combined_eyes_rx.activate_cloned(),
                 args.osc_out_address.clone(),
             ));
         }
@@ -189,12 +170,10 @@ fn start_desktop_tasks(args: &Args, app: &App) -> Vec<JoinHandle<()>> {
         #[cfg(feature = "gui")]
         {
             tasks.push(start_ui(crate::ui::AppRendererContext {
-                l_rx: app.l_cam_rx.activate_cloned(),
-                r_rx: app.r_cam_rx.activate_cloned(),
+                eyes_cam_rx: app.eyes_cam_rx.activate_cloned(),
                 f_rx: app.f_cam_rx.activate_cloned(),
-                l_raw_rx: app.l_raw_eye_rx.activate_cloned(),
-                r_raw_rx: app.r_raw_eye_rx.activate_cloned(),
-                filtered_eyes_rx: app.filtered_eyes_rx.activate_cloned(),
+                raw_eyes_rx: app.raw_eyes_rx.activate_cloned(),
+                combined_eyes_rx: app.combined_eyes_rx.activate_cloned(),
             }));
         }
 

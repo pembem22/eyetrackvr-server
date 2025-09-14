@@ -6,10 +6,10 @@ use rosc::{OscBundle, OscMessage, OscPacket, OscType, encoder};
 use tokio::net::UdpSocket;
 use tokio_stream::StreamExt;
 
-use crate::structs::EyeState;
+use crate::structs::{CombinedEyeGazeState, EyesGazeState};
 
 pub fn start_osc_sender(
-    mut rx: Receiver<(EyeState, EyeState)>,
+    mut rx: Receiver<CombinedEyeGazeState>,
     osc_out_address: String,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
@@ -19,7 +19,7 @@ pub fn start_osc_sender(
         const VRCHAT_NATIVE: bool = true;
         const VRCFT_V2: bool = true;
 
-        while let Some((l, r)) = rx.next().await {
+        while let Some(combined_eyes) = rx.next().await {
             if VRCHAT_NATIVE {
                 const SEND_EYES_CLOSED: bool = true;
 
@@ -27,10 +27,10 @@ pub fn start_osc_sender(
                     &encoder::encode(&OscPacket::Message(OscMessage {
                         addr: "/tracking/eye/LeftRightPitchYaw".to_string(),
                         args: vec![
-                            OscType::Float(l.pitch),
-                            OscType::Float(l.yaw),
-                            OscType::Float(r.pitch),
-                            OscType::Float(r.yaw),
+                            OscType::Float(combined_eyes.pitch),
+                            OscType::Float(combined_eyes.l_yaw),
+                            OscType::Float(combined_eyes.pitch),
+                            OscType::Float(combined_eyes.r_yaw),
                         ],
                     }))
                     .unwrap(),
@@ -39,10 +39,15 @@ pub fn start_osc_sender(
                 .unwrap();
 
                 if SEND_EYES_CLOSED {
+                    let vrc_eyelids = f32::clamp(
+                        1.0 - (combined_eyes.l_eyelid + combined_eyes.r_eyelid) / 0.75 / 2.0,
+                        0.0,
+                        1.0,
+                    );
                     sock.send(
                         &encoder::encode(&OscPacket::Message(OscMessage {
                             addr: "/tracking/eye/EyesClosedAmount".to_string(),
-                            args: vec![OscType::Float(1.0 - (l.eyelid + r.eyelid) / 2.0)],
+                            args: vec![OscType::Float(vrc_eyelids)],
                         }))
                         .unwrap(),
                     )
@@ -54,11 +59,16 @@ pub fn start_osc_sender(
             if VRCFT_V2 {
                 const VRCFT_OSC_PREFIX: &str = "/avatar/parameters/FT/v2/";
 
-                let l_yaw_norm = l.yaw.to_radians().sin();
-                let l_pitch_norm = l.pitch.to_radians().sin();
-                let r_yaw_norm = r.yaw.to_radians().sin();
-                let r_pitch_norm = r.pitch.to_radians().sin();
-                let pitch_norm = ((l.pitch + r.pitch) / 2.0).to_radians().sin();
+                let l_yaw_norm = combined_eyes.l_yaw.to_radians().sin();
+                let l_pitch_norm = combined_eyes.pitch.to_radians().sin();
+                let l_eyelid = combined_eyes.l_eyelid;
+
+                let r_yaw_norm = combined_eyes.r_yaw.to_radians().sin();
+                let r_pitch_norm = combined_eyes.pitch.to_radians().sin();
+                let r_eyelid = combined_eyes.r_eyelid;
+                let pitch_norm = ((combined_eyes.pitch + combined_eyes.pitch) / 2.0)
+                    .to_radians()
+                    .sin();
 
                 sock.send(
                     &encoder::encode(&OscPacket::Bundle(OscBundle {
@@ -78,7 +88,7 @@ pub fn start_osc_sender(
                             }),
                             OscPacket::Message(OscMessage {
                                 addr: concatcp!(VRCFT_OSC_PREFIX, "EyeLidLeft").to_string(),
-                                args: vec![OscType::Float(l.eyelid * 0.75)],
+                                args: vec![OscType::Float(l_eyelid)],
                             }),
                             OscPacket::Message(OscMessage {
                                 addr: concatcp!(VRCFT_OSC_PREFIX, "EyeRightX").to_string(),
@@ -90,7 +100,7 @@ pub fn start_osc_sender(
                             }),
                             OscPacket::Message(OscMessage {
                                 addr: concatcp!(VRCFT_OSC_PREFIX, "EyeLidRight").to_string(),
-                                args: vec![OscType::Float(r.eyelid * 0.75)],
+                                args: vec![OscType::Float(r_eyelid)],
                             }),
                         ],
                     }))
