@@ -57,7 +57,7 @@ pub struct HttpCameraSource {
 
 impl HttpCameraSource {
     pub fn new(url: String) -> Self {
-        Self { url: url }
+        Self { url }
     }
 }
 

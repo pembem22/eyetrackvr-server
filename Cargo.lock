@@ -1071,6 +1071,7 @@ dependencies = [
  "quaternion-core",
  "rosc",
  "serde_json",
+ "smallvec 1.15.1",
  "tokio",
  "tokio-serial",
  "tokio-stream",

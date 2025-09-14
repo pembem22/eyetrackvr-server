@@ -2,8 +2,6 @@ use std::fmt::Debug;
 
 use async_broadcast::Sender;
 use async_trait::async_trait;
-use futures::future::join_all;
-use image::GenericImageView;
 
 use crate::{
     camera::Frame,

@@ -134,7 +134,7 @@ impl AppRenderer {
         });
 
         #[cfg(feature = "inference")]
-        self.draw_inference_window(&ui);
+        self.draw_inference_window(ui);
     }
 
     #[cfg(feature = "inference")]
@@ -145,7 +145,7 @@ impl AppRenderer {
         ui.window("Inference").build(move || {
             // Cropped Camera Feeds
 
-            use crate::structs::EyeGazeState;
+            
 
             let draw_cropped_feed = |camera_texture: CameraTexture| {
                 imgui::Image::new(

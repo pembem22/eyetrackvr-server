@@ -1,4 +1,3 @@
-use std::io::Cursor;
 
 use async_broadcast::{InactiveReceiver, Receiver};
 use hyper::http;
@@ -7,7 +6,6 @@ use hyper::{
     body::Bytes,
     service::{make_service_fn, service_fn},
 };
-use image::codecs::jpeg::JpegEncoder;
 use tokio::task::JoinHandle;
 use tokio_stream::StreamExt;
 

@@ -6,7 +6,7 @@ use rosc::{OscBundle, OscMessage, OscPacket, OscType, encoder};
 use tokio::net::UdpSocket;
 use tokio_stream::StreamExt;
 
-use crate::structs::{CombinedEyeGazeState, EyesGazeState};
+use crate::structs::CombinedEyeGazeState;
 
 pub fn start_osc_sender(
     mut rx: Receiver<CombinedEyeGazeState>,

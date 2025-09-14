@@ -1,7 +1,6 @@
 use async_broadcast::{InactiveReceiver, Sender};
-use tokio::task::JoinHandle;
 
-use crate::camera::{Camera, Eye, Frame};
+use crate::camera::Frame;
 use crate::structs::{CombinedEyeGazeState, EyesFrame, EyesGazeState};
 
 // Utility for creating a broadcast pair with 1 element queue, overflow on, and deactivated receiver.

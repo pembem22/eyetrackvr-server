@@ -41,7 +41,7 @@ pub struct Frame {
 
 impl<'a> Frame {
     pub fn as_jpeg_bytes(&mut self) -> Vec<u8> {
-        if let None = self.raw_jpeg_data {
+        if self.raw_jpeg_data.is_none() {
             let vec = Vec::with_capacity(8192);
             let mut cursor = Cursor::new(vec);
 

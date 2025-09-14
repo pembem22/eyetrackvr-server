@@ -19,7 +19,7 @@ use clap::Parser;
 use futures::future::try_join_all;
 use tokio::task::JoinHandle;
 
-use crate::{app::App, camera::*};
+use crate::app::App;
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -65,7 +65,7 @@ pub async fn desktop_main() {
     nokhwa::query(nokhwa::utils::ApiBackend::Auto)
         .unwrap()
         .iter()
-        .for_each(|cam| println!("{:#?}", cam));
+        .for_each(|cam| println!("{cam:#?}"));
 
     let args = Args::parse();
 

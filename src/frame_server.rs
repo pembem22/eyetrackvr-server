@@ -1,10 +1,8 @@
 use std::{io::Cursor, time::SystemTime};
 
-use async_broadcast::{InactiveReceiver, Receiver, RecvError};
-use futures::{SinkExt, future::join_all};
-use image::codecs::{jpeg::JpegEncoder, png::PngEncoder};
-use serde_json::Value;
-use smallvec::{SmallVec, smallvec};
+use async_broadcast::{InactiveReceiver, RecvError};
+use futures::SinkExt;
+use image::codecs::png::PngEncoder;
 use tokio::{
     fs::{self, create_dir_all},
     io::AsyncWriteExt,
@@ -14,10 +12,7 @@ use tokio::{
 use tokio_stream::StreamExt;
 use tokio_util::codec::{Decoder, LinesCodec};
 
-use crate::{
-    camera::Frame,
-    structs::{EyesFrame, EyesFrameType},
-};
+use crate::structs::{EyesFrame, EyesFrameType};
 
 pub fn start_frame_server(rx: InactiveReceiver<EyesFrame>) -> JoinHandle<()> {
     tokio::spawn(async move {

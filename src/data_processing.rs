@@ -1,12 +1,8 @@
-use std::time::SystemTime;
 
 use async_broadcast::{Receiver, Sender};
 use tokio::task::JoinHandle;
 
-use one_euro_rs::OneEuroFilter;
-use tokio_stream::StreamExt;
 
-use crate::camera::Eye;
 use crate::structs::{CombinedEyeGazeState, EyesGazeState};
 
 pub fn process_gaze(
