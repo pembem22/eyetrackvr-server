@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use async_broadcast::{Receiver, Sender};
+use async_broadcast::{Receiver, RecvError, Sender};
 use tokio::task::JoinHandle;
 
 use crate::structs::{CombinedEyeGazeState, Eye, EyeGazeState, EyesGazeState, ZERO_TIMESTAMP};
@@ -29,7 +29,23 @@ pub fn process_gaze(
         let mut r_state = EyeGazeState::default();
         let mut r_time = ZERO_TIMESTAMP;
 
-        while let Ok(eyes_gaze) = rx.recv_direct().await {
+        loop {
+            let eyes_gaze = loop {
+                match rx.recv_direct().await {
+                    Ok(eyes_frame) => break eyes_frame,
+                    Err(e) => match e {
+                        RecvError::Overflowed(skipped) => {
+                            println!("Skipped {skipped} frames");
+                            continue;
+                        }
+                        RecvError::Closed => {
+                            println!("Channel closed");
+                            return;
+                        }
+                    },
+                }
+            };
+            
             match eyes_gaze {
                 EyesGazeState::Both {
                     l_state: new_l_state,
@@ -116,7 +132,7 @@ pub fn process_gaze(
                 }
             };
 
-            println!("{:#?}", combined_gaze);
+            // println!("{:#?}", combined_gaze);
 
             tx.broadcast_direct(combined_gaze).await.unwrap();
         }
