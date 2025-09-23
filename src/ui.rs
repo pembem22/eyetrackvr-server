@@ -6,7 +6,7 @@ use crate::{camera::Frame, structs::EyeGazeState};
 use crate::inference::{
     FRAME_CROP_H, FRAME_CROP_W, FRAME_CROP_X, FRAME_CROP_Y, FRAME_RESIZE_H, FRAME_RESIZE_W,
 };
-use crate::structs::{CombinedEyeGazeState, EyesFrame, EyesGazeState};
+use crate::structs::{CombinedEyeGazeState, Eye, EyesFrame, EyesGazeState};
 use async_broadcast::Receiver;
 use image::{DynamicImage, ImageBuffer, Rgb, SubImage};
 
@@ -91,8 +91,20 @@ impl AppRenderer {
                 },
             };
         } {
-            self.l_raw_eye = raw_eyes_state.l;
-            self.r_raw_eye = raw_eyes_state.r;
+            match raw_eyes_state {
+                EyesGazeState::Both {
+                    l_state, r_state, ..
+                } => {
+                    self.l_raw_eye = l_state;
+                    self.r_raw_eye = r_state;
+                }
+                EyesGazeState::Mono { eye, state, .. } => {
+                    match eye {
+                        Eye::L => self.l_raw_eye = state,
+                        Eye::R => self.r_raw_eye = state,
+                    };
+                }
+            }
         }
 
         self.filtered_eyes = loop {
@@ -144,8 +156,6 @@ impl AppRenderer {
 
         ui.window("Inference").build(move || {
             // Cropped Camera Feeds
-
-            
 
             let draw_cropped_feed = |camera_texture: CameraTexture| {
                 imgui::Image::new(

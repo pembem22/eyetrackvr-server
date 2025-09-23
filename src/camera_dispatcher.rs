@@ -5,7 +5,7 @@ use async_trait::async_trait;
 
 use crate::{
     camera::Frame,
-    structs::{EyesFrame, EyesFrameType},
+    structs::{Eye, EyesFrame, EyesFrameType},
 };
 
 #[async_trait]
@@ -40,12 +40,12 @@ impl CameraDispatcher for StereoEyesCameraDispatcher {
 #[derive(Debug)]
 pub struct MonoEyeCameraDispatcher {
     sender: Sender<EyesFrame>,
-    frame_type: EyesFrameType,
+    eye: Eye,
 }
 
 impl MonoEyeCameraDispatcher {
-    pub fn new(frame_type: EyesFrameType, sender: Sender<EyesFrame>) -> Self {
-        Self { sender, frame_type }
+    pub fn new(eye: Eye, sender: Sender<EyesFrame>) -> Self {
+        Self { sender, eye }
     }
 }
 
@@ -55,7 +55,10 @@ impl CameraDispatcher for MonoEyeCameraDispatcher {
         self.sender
             .broadcast_direct(EyesFrame {
                 frame,
-                frame_type: self.frame_type,
+                frame_type: match self.eye {
+                    Eye::L => EyesFrameType::Left,
+                    Eye::R => EyesFrameType::Rigth,
+                },
             })
             .await
             .unwrap();

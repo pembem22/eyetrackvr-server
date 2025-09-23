@@ -153,7 +153,7 @@ pub fn start_serial_watcher(mac_to_sender: HashMap<String, Sender<Frame>>) -> Jo
                                 image_size =
                                     u16::from_le_bytes([last_bytes[4], last_bytes[5]]) as usize;
 
-                                // Start collecting the new image.
+                                // Start collecting the next image.
                                 image_data.clear();
                                 collecting = true;
                             } else if collecting {

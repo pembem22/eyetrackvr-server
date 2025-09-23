@@ -5,13 +5,13 @@ use crate::camera_manager;
 use crate::frame_server::start_frame_server;
 
 #[cfg(feature = "inference")]
-use crate::data_processing::{process_gaze};
+use crate::data_processing::process_gaze;
 #[cfg(feature = "inference")]
 use crate::inference::eye_inference;
 #[cfg(feature = "inference")]
 use crate::osc_sender::start_osc_sender;
 
-use crate::structs::EyesFrameType;
+use crate::structs::Eye;
 #[cfg(feature = "gui")]
 use crate::window_desktop::start_ui;
 
@@ -105,7 +105,7 @@ fn start_desktop_tasks(args: &Args, app: &App) -> Vec<JoinHandle<()>> {
         let camera_source = camera_manager::camera_source_from_uri(l_camera_url.to_string());
         match camera_source {
             Some(camera_source) => tasks.push(camera_source.run(Box::new(
-                MonoEyeCameraDispatcher::new(EyesFrameType::Left, app.eye_cam_tx.clone()),
+                MonoEyeCameraDispatcher::new(Eye::L, app.eye_cam_tx.clone()),
             ))),
             None => eprintln!("Invalid camera URI {l_camera_url}"),
         }
@@ -115,7 +115,7 @@ fn start_desktop_tasks(args: &Args, app: &App) -> Vec<JoinHandle<()>> {
         let camera_source = camera_manager::camera_source_from_uri(r_camera_url.to_string());
         match camera_source {
             Some(camera_source) => tasks.push(camera_source.run(Box::new(
-                MonoEyeCameraDispatcher::new(EyesFrameType::Rigth, app.eye_cam_tx.clone()),
+                MonoEyeCameraDispatcher::new(Eye::R, app.eye_cam_tx.clone()),
             ))),
             None => eprintln!("Invalid camera URI {r_camera_url}"),
         }

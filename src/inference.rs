@@ -6,8 +6,8 @@ use ort::{
 };
 use tokio::task::JoinHandle;
 
-use crate::structs::EyesFrame;
-use crate::structs::{EyeGazeState, EyesGazeState};
+use crate::structs::{Eye, EyeGazeState, EyesGazeState};
+use crate::structs::{EyesFrame, EyesFrameType};
 
 pub const FRAME_CROP_X: u32 = 30;
 pub const FRAME_CROP_Y: u32 = 30;
@@ -48,25 +48,20 @@ pub fn eye_inference(
         .unwrap();
 
         loop {
-            let eyes_frame = match rx.recv_blocking() {
-                Ok(eyes_frame) => Some(eyes_frame),
-                Err(e) => {
-                    match e {
+            let eyes_frame = loop {
+                match rx.recv_blocking() {
+                    Ok(eyes_frame) => break eyes_frame,
+                    Err(e) => match e {
                         RecvError::Overflowed(skipped) => {
-                            println!("Skipped {skipped} frames")
+                            println!("Skipped {skipped} frames");
+                            continue;
                         }
                         RecvError::Closed => {
                             println!("Channel closed");
-                            break;
+                            return;
                         }
-                    };
-                    None
+                    },
                 }
-            };
-
-            let eyes_frame = match eyes_frame {
-                Some(eyes_frame) => eyes_frame,
-                None => continue,
             };
 
             let mut run_eye_inference = |frame_view: image::SubImage<
@@ -110,24 +105,43 @@ pub fn eye_inference(
                     pitch: output[0],
                     yaw: output[1] * if is_left { 1.0 } else { -1.0 },
                     eyelid: output[2],
-                    timestamp: eyes_frame.frame.timestamp,
                 }
             };
 
-            let l_eye_result = run_eye_inference(eyes_frame.get_left_view().unwrap(), true);
-            let r_eye_result: EyeGazeState =
-                run_eye_inference(eyes_frame.get_right_view().unwrap(), false);
+            match eyes_frame.frame_type {
+                EyesFrameType::Both => {
+                    let l_state = run_eye_inference(eyes_frame.get_left_view().unwrap(), true);
+                    let r_state: EyeGazeState =
+                        run_eye_inference(eyes_frame.get_right_view().unwrap(), false);
 
-            // println!("{:#?}", EyesGazeState {
-            //     l: l_eye_result,
-            //     r: r_eye_result,
-            // });
+                    tx.broadcast_blocking(EyesGazeState::Both {
+                        l_state,
+                        r_state,
+                        timestamp: eyes_frame.frame.timestamp,
+                    })
+                    .unwrap();
+                }
+                EyesFrameType::Left => {
+                    let l_state = run_eye_inference(eyes_frame.get_left_view().unwrap(), true);
 
-            tx.broadcast_blocking(EyesGazeState {
-                l: l_eye_result,
-                r: r_eye_result,
-            })
-            .unwrap();
+                    tx.broadcast_blocking(EyesGazeState::Mono {
+                        eye: Eye::L,
+                        state: l_state,
+                        timestamp: eyes_frame.frame.timestamp,
+                    })
+                    .unwrap();
+                }
+                EyesFrameType::Rigth => {
+                    let r_state = run_eye_inference(eyes_frame.get_right_view().unwrap(), false);
+
+                    tx.broadcast_blocking(EyesGazeState::Mono {
+                        eye: Eye::R,
+                        state: r_state,
+                        timestamp: eyes_frame.frame.timestamp,
+                    })
+                    .unwrap();
+                }
+            }
         }
     })
 }

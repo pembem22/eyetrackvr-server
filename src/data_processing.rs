@@ -1,9 +1,11 @@
+use std::time::Duration;
 
 use async_broadcast::{Receiver, Sender};
 use tokio::task::JoinHandle;
 
+use crate::structs::{CombinedEyeGazeState, Eye, EyeGazeState, EyesGazeState, ZERO_TIMESTAMP};
 
-use crate::structs::{CombinedEyeGazeState, EyesGazeState};
+const EYE_TIMEOUT: Duration = Duration::from_millis(50);
 
 pub fn process_gaze(
     mut rx: Receiver<EyesGazeState>,
@@ -21,39 +23,102 @@ pub fn process_gaze(
 
         // let last_timestamp = SystemTime::now();
 
+        let mut l_state = EyeGazeState::default();
+        let mut l_time = ZERO_TIMESTAMP;
+
+        let mut r_state = EyeGazeState::default();
+        let mut r_time = ZERO_TIMESTAMP;
+
         while let Ok(eyes_gaze) = rx.recv_direct().await {
-            // let filter_secs = eye
-            //     .timestamp
-            //     .duration_since(last_timestamp)
-            //     .unwrap()
-            //     .as_secs_f32();
+            match eyes_gaze {
+                EyesGazeState::Both {
+                    l_state: new_l_state,
+                    r_state: new_r_state,
+                    timestamp,
+                } => {
+                    l_state = new_l_state;
+                    r_state = new_r_state;
 
-            let l_gaze = eyes_gaze.l;
-            let r_gaze = eyes_gaze.r;
+                    l_time = timestamp;
+                    r_time = timestamp;
+                }
+                EyesGazeState::Mono {
+                    eye,
+                    state,
+                    timestamp,
+                } => match eye {
+                    Eye::L => {
+                        l_state = state;
+                        l_time = timestamp;
+                    }
+                    Eye::R => {
+                        r_state = state;
+                        r_time = timestamp;
+                    }
+                },
+            };
 
-            let avg_pitch = (l_gaze.pitch + r_gaze.pitch) / 2.0;
+            let combined_gaze = 'combined: {
+                // Left eye has timed out.
+                if r_time > l_time && r_time.duration_since(l_time).unwrap() > EYE_TIMEOUT {
+                    break 'combined CombinedEyeGazeState {
+                        pitch: r_state.pitch,
+                        l_yaw: r_state.yaw,
+                        r_yaw: r_state.yaw,
+                        l_eyelid: r_state.eyelid,
+                        r_eyelid: r_state.eyelid,
+                        timestamp: r_time,
+                    };
+                }
 
-            let avg_yaw = (l_gaze.yaw + r_gaze.yaw) / 2.0;
-            // TODO: this is basically convergence distance, smooth it. 
-            let yaw_diff = (l_gaze.yaw - r_gaze.yaw).abs();
-            let l_yaw = avg_yaw + yaw_diff / 2.0;
-            let r_yaw = avg_yaw - yaw_diff / 2.0;
+                // Right eye has timed out.
+                if l_time > r_time && l_time.duration_since(r_time).unwrap() > EYE_TIMEOUT {
+                    break 'combined CombinedEyeGazeState {
+                        pitch: l_state.pitch,
+                        l_yaw: l_state.yaw,
+                        r_yaw: l_state.yaw,
+                        l_eyelid: l_state.eyelid,
+                        r_eyelid: l_state.eyelid,
+                        timestamp: l_time,
+                    };
+                }
 
+                // Left eye is behind.
+                if l_time < r_time {
+                    // TODO: apply prediction.
+                }
+                // Right eye is behind.
+                if r_time < l_time {
+                    // TODO: apply prediction.
+                }
 
-            // let pitch = filter_pitch.filter_with_delta(eye.pitch, filter_secs);
-            // let yaw = filter_yaw.filter_with_delta(eye.yaw, filter_secs);
-            // let eyelid = filter_eyelid.filter_with_delta(eye.eyelid, filter_secs);
+                let timestamp = std::cmp::max(l_time, r_time);
 
-            tx.broadcast_direct(CombinedEyeGazeState {
-                pitch: avg_pitch,
-                l_yaw,
-                r_yaw,
-                l_eyelid: l_gaze.eyelid,
-                r_eyelid: r_gaze.eyelid,
-                timestamp: l_gaze.timestamp,
-            })
-            .await
-            .unwrap();
+                let avg_pitch = (l_state.pitch + r_state.pitch) / 2.0;
+
+                let avg_yaw = (l_state.yaw + r_state.yaw) / 2.0;
+                // TODO: this is basically convergence distance, smooth it.
+                let yaw_diff = (l_state.yaw - r_state.yaw).abs();
+                let l_yaw = avg_yaw + yaw_diff / 2.0;
+                let r_yaw = avg_yaw - yaw_diff / 2.0;
+
+                // let pitch = filter_pitch.filter_with_delta(eye.pitch, filter_secs);
+                // let yaw = filter_yaw.filter_with_delta(eye.yaw, filter_secs);
+                // let eyelid = filter_eyelid.filter_with_delta(eye.eyelid, filter_secs);
+
+                CombinedEyeGazeState {
+                    pitch: avg_pitch,
+                    l_yaw,
+                    r_yaw,
+                    l_eyelid: l_state.eyelid,
+                    r_eyelid: r_state.eyelid,
+                    timestamp,
+                }
+            };
+
+            println!("{:#?}", combined_gaze);
+
+            tx.broadcast_direct(combined_gaze).await.unwrap();
         }
     })
 }
