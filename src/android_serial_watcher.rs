@@ -1,13 +1,14 @@
 use std::collections::HashMap;
 use std::io::{Cursor, Read};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
 use android_usbser::{CdcSerial, usb};
-use async_broadcast::Sender;
-use futures::StreamExt;
 use hex_literal::hex;
+use pollster::FutureExt;
 use tokio::task::JoinHandle;
 use tokio_serial::SerialPort;
+use tokio_stream::StreamExt;
 
 use crate::camera::Frame;
 
@@ -60,10 +61,15 @@ impl Iterator for SerialByteStream {
 
 pub fn start_serial_watcher(mac_to_sender: HashMap<String, Sender<Frame>>) -> JoinHandle<()> {
     tokio::spawn(async move {
-        let mut watcher = usb::watch_devices().unwrap();
+        let mac_to_sender = Arc::new(Mutex::new(mac_to_sender));
+
+        let mut devices_stream = futures::stream::iter(usb::list_devices().unwrap())
+            .map(|d| usb::HotplugEvent::Connected(d))
+            .merge(usb::watch_devices().unwrap());
 
         loop {
-            match watcher.next().await {
+            let mac_to_sender = mac_to_sender.clone();
+            match devices_stream.next().await {
                 None => continue,
                 Some(usb::HotplugEvent::Connected(dev)) => {
                     let dev_info = if dev.has_permission().unwrap() {
@@ -87,7 +93,7 @@ pub fn start_serial_watcher(mac_to_sender: HashMap<String, Sender<Frame>>) -> Jo
                     // println!("Opened {dev_info:?}");
 
                     // Need to do this because of the bug described in `DeviceInfo::serial_number`.
-                    let Some(serial) = usb::list_devices()
+                    let Some(serial_num) = usb::list_devices()
                         .unwrap()
                         .iter()
                         .find(|d| d.path_name() == dev_info.path_name())
@@ -99,17 +105,17 @@ pub fn start_serial_watcher(mac_to_sender: HashMap<String, Sender<Frame>>) -> Jo
                         continue;
                     };
 
-                    println!("Serial {serial:?}");
+                    println!("Serial {serial_num:?}");
 
-                    let Some(sender) = mac_to_sender.get(&serial).cloned() else {
-                        println!("Serial {serial:?} is not recognized");
+                    let Some(dispatcher) = mac_to_sender.lock().unwrap().remove(&serial_num) else {
+                        println!("Serial {serial_num:?} is not recognized");
                         continue;
                     };
 
-                    println!("Recognized serial {serial:?}");
+                    println!("Recognized serial {serial_num:?}");
 
                     tokio::task::spawn_blocking(move || {
-                        println!("Started blocking task for serial {serial}");
+                        println!("Started blocking task for serial {serial_num}");
                         let mut serial =
                             CdcSerial::build(&dev_info, Duration::from_millis(300)).unwrap();
                         println!("Opened, setting config...");
@@ -140,10 +146,10 @@ pub fn start_serial_watcher(mac_to_sender: HashMap<String, Sender<Frame>>) -> Jo
                                     let image = image.as_rgb8().unwrap().to_owned();
                                     let new_frame = Frame {
                                         timestamp: SystemTime::now(),
-                                        raw_data: image_data.clone(),
+                                        raw_jpeg_data: Some(image_data.clone()),
                                         decoded: image,
                                     };
-                                    sender.broadcast_blocking(new_frame).unwrap();
+                                    dispatcher.dispatch(new_frame).block_on();
                                 } else {
                                     println!("Warning: failed to decode image");
                                 }
@@ -160,6 +166,8 @@ pub fn start_serial_watcher(mac_to_sender: HashMap<String, Sender<Frame>>) -> Jo
                                 image_data.push(byte);
                             }
                         }
+
+                        mac_to_sender.lock().unwrap().insert(serial_num, dispatcher);
 
                         println!("Serial stream ended");
                     });
