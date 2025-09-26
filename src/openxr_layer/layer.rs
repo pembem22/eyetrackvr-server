@@ -726,6 +726,7 @@ impl OpenXRLayer {
                 return self.locate_space.unwrap()(space, base_space, time, location);
             }
 
+            // println!("--> eye gaze {:?} {:?} {:?}", space, base_space, time);
             // println!("locate_space {:?} {:?}", space, base_space);
 
             // Determine where the VIEW space is in relation to the requested `base_space`.
@@ -844,6 +845,8 @@ impl OpenXRLayer {
         unsafe {
             let expression_info = &*expression_info;
             let expression_weights = &mut *expression_weights;
+
+            // println!("--> get_face_expression_weights2 {:?}", expression_info);
 
             if expression_weights.weight_count != FaceExpression2FB::COUNT.into_raw() as u32 {
                 return xr_sys::Result::ERROR_VALIDATION_FAILURE;
@@ -974,10 +977,9 @@ impl OpenXRLayer {
         gaze_info: *const xr_sys::EyeGazesInfoFB,
         eye_gazes: *mut xr_sys::EyeGazesFB,
     ) -> xr_sys::Result {
-        // println!("--> destroy_eye_tracker {:#?}", eye_tracker);
-
         unsafe {
             let gaze_info = &*gaze_info;
+            // println!("--> get_eye_gazes_fb {:?}", gaze_info);
             let eye_gazes = &mut *eye_gazes;
 
             // Determine where the VIEW space is in relation to the requested `base_space`.
@@ -1025,7 +1027,6 @@ impl OpenXRLayer {
 
             let pitch_yaw_to_pose = |pitch: f32, yaw: f32, is_left: bool| {
                 let mut q_gaze_in_view = quat_from_pitch_yaw(pitch, yaw);
-                q_gaze_in_view.1[0] += if is_left { 0.0325 } else { -0.0325 };
 
                 let q_base_in_view: quat::Quaternion<f32> = (
                     base_from_view_space.orientation.w,
@@ -1047,7 +1048,10 @@ impl OpenXRLayer {
                         z: q_gaze_in_base.1[2],
                     },
                     position: Vector3f {
-                        x: 0.0,
+                        // TODO: can't find anything in the specs about this, but QPro seems to include IPD
+                        // (at least some, idk if it's actual IPD) to position eye gaze origins.
+                        // Steam Link refuses to work without this.
+                        x: if is_left { -0.0325 } else { 0.0325 },
                         y: 0.0,
                         z: 0.0,
                     },
@@ -1083,10 +1087,9 @@ impl OpenXRLayer {
                 gaze_confidence: 1.0,
             };
             eye_gazes.time = gaze_info.time;
-
-            // println!("{eye_gazes:#?}");
         }
 
+        // println!("{:#?}", unsafe { *eye_gazes });
         xr_sys::Result::SUCCESS
     }
 

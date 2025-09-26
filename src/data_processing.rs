@@ -121,8 +121,14 @@ pub fn process_gaze(
                 let avg_pitch = (l_state.pitch + r_state.pitch) / 2.0;
 
                 let avg_yaw = (l_state.yaw + r_state.yaw) / 2.0;
+
                 // TODO: this is basically convergence distance, smooth it.
-                let yaw_diff = (l_state.yaw - r_state.yaw).max(0.0);
+                let yaw_diff = l_state.yaw - r_state.yaw;
+                // Slightly nudge the eyes together. Otherwise Steam Link refuses
+                // to use eye tracking from the `XR_FB_eye_tracking_social` extension.
+                // Probably tries to calculate convergence distance.
+                let yaw_diff = yaw_diff.max(0.05);
+
                 let l_yaw = avg_yaw + yaw_diff / 2.0;
                 let r_yaw = avg_yaw - yaw_diff / 2.0;
 
