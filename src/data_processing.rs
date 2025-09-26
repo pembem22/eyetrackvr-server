@@ -122,7 +122,7 @@ pub fn process_gaze(
 
                 let avg_yaw = (l_state.yaw + r_state.yaw) / 2.0;
                 // TODO: this is basically convergence distance, smooth it.
-                let yaw_diff = (l_state.yaw - r_state.yaw).abs();
+                let yaw_diff = (l_state.yaw - r_state.yaw).max(0.0);
                 let l_yaw = avg_yaw + yaw_diff / 2.0;
                 let r_yaw = avg_yaw - yaw_diff / 2.0;
 
