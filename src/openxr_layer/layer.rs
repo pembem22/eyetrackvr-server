@@ -471,28 +471,65 @@ impl OpenXRLayer {
         system_id: xr_sys::SystemId,
         properties: *mut xr_sys::SystemProperties,
     ) -> xr_sys::Result {
-        println!("--> get_system_properties");
+        // TODO: this is still not following the specs. It does hide the
+        // structures, but also can reorder them after unhiding. The specs
+        // say modifying `type` and `next` are prohibited, so no reordering.
+        let mut hidden_properties = Vec::new();
 
+        let mut prev_property_ptr = ptr::null_mut::<xr_sys::BaseOutStructure>();
         let mut property_ptr = properties as *mut xr_sys::BaseOutStructure;
         while !property_ptr.is_null() {
             let property = unsafe { &mut *property_ptr };
 
-            println!("get_system_properties type {:?}", property.ty);
+            println!("--> get_system_properties {property:#?}");
 
-            if property.ty == xr_sys::StructureType::SYSTEM_EYE_GAZE_INTERACTION_PROPERTIES_EXT {
-                let property = unsafe {
-                    &mut *(property_ptr as *mut xr_sys::SystemEyeGazeInteractionPropertiesEXT)
-                };
-                property.supports_eye_gaze_interaction = true.into();
+            // Process the properties.
+            match property.ty {
+                xr_sys::StructureType::SYSTEM_EYE_GAZE_INTERACTION_PROPERTIES_EXT => {
+                    let property = unsafe {
+                        &mut *(property_ptr as *mut xr_sys::SystemEyeGazeInteractionPropertiesEXT)
+                    };
+                    property.supports_eye_gaze_interaction = true.into();
+
+                    hidden_properties.push(property_ptr);
+                }
+
+                xr_sys::StructureType::SYSTEM_FACE_TRACKING_PROPERTIES2_FB => {
+                    let property = unsafe {
+                        &mut *(property_ptr as *mut xr_sys::SystemFaceTrackingProperties2FB)
+                    };
+                    property.supports_visual_face_tracking = true.into();
+                    property.supports_audio_face_tracking = false.into();
+                }
+
+                xr_sys::StructureType::SYSTEM_EYE_TRACKING_PROPERTIES_FB => {
+                    let property = unsafe {
+                        &mut *(property_ptr as *mut xr_sys::SystemEyeTrackingPropertiesFB)
+                    };
+                    property.supports_eye_tracking = true.into();
+                }
+
+                _ => {}
             }
 
-            if property.ty == xr_sys::StructureType::SYSTEM_FACE_TRACKING_PROPERTIES2_FB {
-                let property =
-                    unsafe { &mut *(property_ptr as *mut xr_sys::SystemFaceTrackingProperties2FB) };
-                property.supports_visual_face_tracking = true.into();
-                property.supports_audio_face_tracking = false.into();
+            // Hide the properties from the runtime.
+            match property.ty {
+                xr_sys::StructureType::SYSTEM_EYE_GAZE_INTERACTION_PROPERTIES_EXT
+                | xr_sys::StructureType::SYSTEM_FACE_TRACKING_PROPERTIES2_FB
+                | xr_sys::StructureType::SYSTEM_EYE_TRACKING_PROPERTIES_FB => {
+                    hidden_properties.push(property_ptr);
+
+                    if !prev_property_ptr.is_null() {
+                        unsafe {
+                            (*prev_property_ptr).next = property.next;
+                        }
+                    }
+                }
+
+                _ => {}
             }
 
+            prev_property_ptr = property_ptr;
             property_ptr = property.next;
         }
 
@@ -501,6 +538,29 @@ impl OpenXRLayer {
         if result != xr_sys::Result::SUCCESS {
             println!("get_system_properties result: {result:?}");
             return result;
+        }
+
+        // Find the end of the chain.
+        let mut prev_property_ptr = ptr::null_mut::<xr_sys::BaseOutStructure>();
+        let mut property_ptr = properties as *mut xr_sys::BaseOutStructure;
+        while !property_ptr.is_null() {
+            let property = unsafe { &mut *property_ptr };
+            prev_property_ptr = property_ptr;
+            property_ptr = property.next;
+        }
+
+        // Add the hidden properties back.
+        if !prev_property_ptr.is_null() {
+            for hidden_property_ptr in hidden_properties {
+                property_ptr = hidden_property_ptr;
+                unsafe {
+                    (*prev_property_ptr).next = property_ptr;
+                }
+                prev_property_ptr = property_ptr;
+            }
+            unsafe {
+                (*prev_property_ptr).next = ptr::null_mut();
+            }
         }
 
         println!("<-- get_system_properties");
