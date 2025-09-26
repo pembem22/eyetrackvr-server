@@ -38,25 +38,25 @@ fn serve(
 }
 
 pub fn start_camera_server(
-    l_rx: InactiveReceiver<Frame>,
-    r_rx: InactiveReceiver<Frame>,
+    // l_rx: InactiveReceiver<Frame>,
+    // r_rx: InactiveReceiver<Frame>,
     f_rx: InactiveReceiver<Frame>,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
         let addr = ([0, 0, 0, 0], 8881).into();
         let make_svc = make_service_fn(move |_conn| {
             // Ugh...
-            let r_rx = r_rx.clone();
-            let l_rx = l_rx.clone();
+            // let r_rx = r_rx.clone();
+            // let l_rx = l_rx.clone();
             let f_rx = f_rx.clone();
             futures::future::ok::<_, std::convert::Infallible>(service_fn(move |req| {
-                let l_rx = l_rx.clone();
-                let r_rx = r_rx.clone();
+                // let l_rx = l_rx.clone();
+                // let r_rx = r_rx.clone();
                 let f_rx = f_rx.clone();
                 async move {
                     let camera_rx = match req.uri().path() {
-                        "/L" => l_rx,
-                        "/R" => r_rx,
+                        // "/L" => l_rx,
+                        // "/R" => r_rx,
                         "/F" => f_rx,
                         _ => {
                             return hyper::Response::builder()

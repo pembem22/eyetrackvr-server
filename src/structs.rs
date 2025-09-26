@@ -4,7 +4,7 @@ use image::{GenericImageView, SubImage};
 
 use crate::camera::Frame;
 
-const EYELID_OPEN_VALUE: f32 = 0.75;
+const EYELID_NEUTRAL_VALUE: f32 = 0.75;
 
 // The plan is to make it possible for this be different for standalone/OpenXR/SteamVR builds.
 pub type Timestamp = SystemTime;
@@ -23,7 +23,7 @@ impl Default for EyeGazeState {
         Self {
             pitch: 0.0,
             yaw: 0.0,
-            eyelid: EYELID_OPEN_VALUE,
+            eyelid: EYELID_NEUTRAL_VALUE,
         }
     }
 }
@@ -51,12 +51,19 @@ pub enum EyesGazeState {
 /// Combined eye gazes with a shared timestamp.
 #[derive(Copy, Clone, Debug)]
 pub struct CombinedEyeGazeState {
+    // For eye expressions.
+    // Individual states of each eye with gaze sanitizing so it looks ok.
     pub pitch: f32,
     pub l_yaw: f32,
     pub r_yaw: f32,
-    // TODO: separate eye expressions from gaze.
     pub l_eyelid: f32,
     pub r_eyelid: f32,
+
+    // Gaze for interaction.
+    // Gaze direction without depth, can e.g. ignore one eye if it's closed, etc.
+    pub gaze_pitch: f32,
+    pub gaze_yaw: f32,
+    
     pub timestamp: Timestamp,
 }
 
@@ -66,9 +73,13 @@ impl Default for CombinedEyeGazeState {
             pitch: 0.0,
             l_yaw: 0.0,
             r_yaw: 0.0,
-            l_eyelid: EYELID_OPEN_VALUE,
-            r_eyelid: EYELID_OPEN_VALUE,
-            timestamp: SystemTime::UNIX_EPOCH,
+            l_eyelid: EYELID_NEUTRAL_VALUE,
+            r_eyelid: EYELID_NEUTRAL_VALUE,
+
+            gaze_pitch: 0.0,
+            gaze_yaw: 0.0,
+
+            timestamp: ZERO_TIMESTAMP,
         }
     }
 }

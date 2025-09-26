@@ -4,6 +4,7 @@
 use std::ffi::CStr;
 use std::ffi::c_char;
 
+use crate::openxr_layer::layer::ADVERTISED_EXTENSIONS;
 use crate::openxr_layer::layer::LAYER;
 
 use openxr::SystemId;
@@ -14,6 +15,10 @@ use openxr_sys::ActionSpaceCreateInfo;
 use openxr_sys::ActionStateGetInfo;
 use openxr_sys::ActionStatePose;
 use openxr_sys::ExtensionProperties;
+use openxr_sys::EyeGazesFB;
+use openxr_sys::EyeGazesInfoFB;
+use openxr_sys::EyeTrackerCreateInfoFB;
+use openxr_sys::EyeTrackerFB;
 use openxr_sys::FaceExpressionInfo2FB;
 use openxr_sys::FaceExpressionWeights2FB;
 use openxr_sys::FaceTracker2FB;
@@ -117,19 +122,38 @@ pub unsafe extern "system" fn xr_create_api_layer_instance(
     unsafe {
         println!("--> xr_create_api_layer_instance");
 
-        // Call the chain to create the instance.
         let mut chain_instance_create_info = *instance_create_info_ptr;
 
-        // Hide our extension from the list assuming it's in the beginning.
-        // Reduce the extension count by one and move the pointer one forward.
-        // This is to avoid an `ERROR_EXTENSION_NOT_PRESENT` error from the runtime.
-        chain_instance_create_info.enabled_extension_count -= 1;
-        chain_instance_create_info.enabled_extension_names =
-            chain_instance_create_info.enabled_extension_names.add(1);
+        // Hide our extension from the list by creating a new array with our extensions removed.
+
+        let requested_extensions = std::slice::from_raw_parts(
+            chain_instance_create_info.enabled_extension_names,
+            (chain_instance_create_info.enabled_extension_count)
+                .try_into()
+                .unwrap(),
+        );
+
+        let filtered_extensions: Vec<_> = requested_extensions
+            .iter()
+            .map(|ptr| CStr::from_ptr(*ptr))
+            .filter(|cstr| {
+                ADVERTISED_EXTENSIONS
+                    .iter()
+                    .find(|ext| ext.name == cstr.to_string_lossy())
+                    .is_none()
+            })
+            .map(|cstr| cstr.as_ptr())
+            .collect();
+
+        // Replace with a filtered list of extensions.
+        chain_instance_create_info.enabled_extension_names = filtered_extensions.as_ptr();
+        chain_instance_create_info.enabled_extension_count = filtered_extensions.len() as u32;
 
         let api_layer_info = *api_layer_info_ptr;
         let mut chain_api_layer_info = api_layer_info;
         chain_api_layer_info.next_info = (*api_layer_info.next_info).next;
+
+        // Call the chain to create the instance.
         let result = ((*api_layer_info.next_info).next_create_api_layer_instance)(
             &chain_instance_create_info,
             &chain_api_layer_info,
@@ -203,13 +227,18 @@ pub unsafe extern "system" fn xr_get_instance_proc_addr(
 
         let layer = &mut LAYER;
 
-        const DONT_REQUEST_FN_ADDRESS: [&str; 3] = [
+        const DONT_REQUEST_FN_ADDRESS: [&str; 6] = [
+            // XR_FB_face_tracking2
             "xrCreateFaceTracker2FB",
             "xrDestroyFaceTracker2FB",
             "xrGetFaceExpressionWeights2FB",
+            // XR_FB_eye_tracking_social
+            "xrCreateEyeTrackerFB",
+            "xrDestroyEyeTrackerFB",
+            "xrGetEyeGazesFB",
         ];
 
-        // We don't want to ask for "xrCreateFaceTracker2FB" from runtime, since it doesn't exist.
+        // We don't want to ask for certain functions from runtime, since they don't exist.
         if !DONT_REQUEST_FN_ADDRESS.contains(&api_name.as_str()) {
             let result = layer.get_instance_proc_addr.unwrap()(instance, name_ptr, function);
 
@@ -338,6 +367,8 @@ pub unsafe extern "system" fn xr_get_instance_proc_addr(
             ));
         }
 
+        // XR_FB_face_tracking2
+
         if api_name == "xrCreateFaceTracker2FB" {
             *function = Some(std::mem::transmute::<
                 pfn::CreateFaceTracker2FB,
@@ -357,6 +388,28 @@ pub unsafe extern "system" fn xr_get_instance_proc_addr(
                 pfn::GetFaceExpressionWeights2FB,
                 pfn::VoidFunction,
             >(xr_get_face_expression_weights2));
+        }
+
+        // XR_FB_eye_tracking_social
+
+        if api_name == "xrCreateEyeTrackerFB" {
+            *function = Some(std::mem::transmute::<
+                pfn::CreateEyeTrackerFB,
+                pfn::VoidFunction,
+            >(xr_create_eye_tracker_fb));
+        }
+
+        if api_name == "xrDestroyEyeTrackerFB" {
+            *function = Some(std::mem::transmute::<
+                pfn::DestroyEyeTrackerFB,
+                pfn::VoidFunction,
+            >(xr_destroy_eye_tracker_fb));
+        }
+
+        if api_name == "xrGetEyeGazesFB" {
+            *function = Some(
+                std::mem::transmute::<pfn::GetEyeGazesFB, pfn::VoidFunction>(xr_get_eye_gazes_fb),
+            );
         }
 
         openxr_sys::Result::SUCCESS
@@ -473,6 +526,26 @@ unsafe extern "system" fn xr_get_face_expression_weights2(
     expression_weights: *mut FaceExpressionWeights2FB,
 ) -> Result {
     unsafe { LAYER.get_face_expression_weights2(face_tracker, expression_info, expression_weights) }
+}
+
+unsafe extern "system" fn xr_create_eye_tracker_fb(
+    session: Session,
+    create_info: *const EyeTrackerCreateInfoFB,
+    eye_tracker: *mut EyeTrackerFB,
+) -> Result {
+    unsafe { LAYER.create_eye_tracker_fb(session, create_info, eye_tracker) }
+}
+
+unsafe extern "system" fn xr_destroy_eye_tracker_fb(eye_tracker: EyeTrackerFB) -> Result {
+    unsafe { LAYER.destroy_eye_tracker(eye_tracker) }
+}
+
+unsafe extern "system" fn xr_get_eye_gazes_fb(
+    eye_tracker: EyeTrackerFB,
+    gaze_info: *const EyeGazesInfoFB,
+    eye_gazes: *mut EyeGazesFB,
+) -> Result {
+    unsafe { LAYER.get_eye_gazes_fb(eye_tracker, gaze_info, eye_gazes) }
 }
 
 /*

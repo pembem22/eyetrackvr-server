@@ -6,6 +6,7 @@ use std::{
 };
 
 use once_cell::sync::Lazy;
+use openxr::{self as xr, FaceConfidence2FB, FaceExpression2FB};
 use openxr_sys::{
     self as xr_sys, BaseInStructure, CompositionLayerBaseHeader, CompositionLayerFlags,
     CompositionLayerQuad, Extent2Df, Extent2Di, EyeVisibility, FrameBeginInfo, FrameEndInfo,
@@ -13,28 +14,32 @@ use openxr_sys::{
     Rect2Di, SessionCreateInfo, SwapchainCreateFlags, SwapchainCreateInfo, SwapchainSubImage,
     SwapchainUsageFlags, Vector3f, pfn,
 };
-
-use openxr::{self as xr, FaceConfidence2FB, FaceExpression2FB};
+use quaternion_core as quat;
 
 #[cfg(feature = "android")]
 use openxr_sys::LoaderInitInfoAndroidKHR;
+use rand::Rng;
 
 use crate::openxr_output::OPENXR_OUTPUT_BRIDGE;
 
 pub static mut LAYER: Lazy<OpenXRLayer> = Lazy::new(OpenXRLayer::new);
 
-struct Extension {
-    name: &'static str,
-    version: u32,
+pub struct Extension {
+    pub name: &'static str,
+    pub version: u32,
 }
 
-const ADVERTISED_EXTENSIONS: &[Extension] = &[
+pub const ADVERTISED_EXTENSIONS: &[Extension] = &[
     Extension {
         name: "XR_EXT_eye_gaze_interaction",
         version: 1,
     },
     Extension {
         name: "XR_FB_face_tracking2",
+        version: 1,
+    },
+    Extension {
+        name: "XR_FB_eye_tracking_social",
         version: 1,
     },
 ];
@@ -61,6 +66,15 @@ unsafe extern "C" {
         read: *mut c_void,
         context: *mut c_void,
     ) -> u8;
+}
+
+/// Pitch yaw in degrees!
+fn quat_from_pitch_yaw(pitch: f32, yaw: f32) -> quat::Quaternion<f32> {
+    quat::from_euler_angles(
+        quat::RotationType::Extrinsic,
+        quat::RotationSequence::XYZ,
+        [-pitch.to_radians(), -yaw.to_radians(), 0.0],
+    )
 }
 
 pub struct OpenXRLayer {
@@ -341,7 +355,6 @@ impl OpenXRLayer {
         layers.reserve_exact(original_layer_count + 1);
         layers.extend_from_slice(original_layers);
 
-        use quaternion_core as quat;
         let q = quat::from_euler_angles(
             quat::RotationType::Extrinsic,
             quat::RotationSequence::XYZ,
@@ -666,9 +679,9 @@ impl OpenXRLayer {
         state: *mut xr_sys::ActionStatePose,
     ) -> xr_sys::Result {
         unsafe {
-            if !self
+            if self
                 .eye_gaze_action
-                .is_some_and(|a| a == (*get_info).action)
+                .is_some_and(|eye_gaze_action| eye_gaze_action != (*get_info).action)
             {
                 return self.get_action_state_pose.unwrap()(session, get_info, state);
             }
@@ -684,9 +697,8 @@ impl OpenXRLayer {
                 // False if there's no bridge yet.
                 .is_some_and(|mut bridge| {
                     // False if there has been no data yet.
-                    bridge.get_openxr_gaze().is_some_and(|gaze| {
-                        gaze.latest_timestamp().elapsed().unwrap()
-                            < std::time::Duration::from_millis(50)
+                    bridge.get_eyes_state().is_some_and(|gaze| {
+                        gaze.timestamp.elapsed().unwrap() < std::time::Duration::from_millis(50)
                     })
                 })
                 .into();
@@ -706,7 +718,11 @@ impl OpenXRLayer {
         unsafe {
             // println!("--> locate_space {:?} {:?} {:?}", space, base_space, time);
 
-            if !self.eye_gaze_space.is_some_and(|s| s == space) {
+            // If the requested space is not eye tracking space, pass through the call.
+            if self
+                .eye_gaze_space
+                .is_some_and(|eye_gaze_space| eye_gaze_space != space)
+            {
                 return self.locate_space.unwrap()(space, base_space, time, location);
             }
 
@@ -749,20 +765,17 @@ impl OpenXRLayer {
             location.location_flags |= xr_sys::SpaceLocationFlags::POSITION_TRACKED;
             location.location_flags |= xr_sys::SpaceLocationFlags::ORIENTATION_TRACKED;
 
-            let gaze = OPENXR_OUTPUT_BRIDGE
+            let eyes_state = OPENXR_OUTPUT_BRIDGE
                 .get()
                 .expect("requested for gaze, but bridge was not initialized yet")
                 .lock()
                 .expect("failed to lock OpenXR output bridge")
-                .get_openxr_gaze()
+                .get_eyes_state()
                 .expect("requested for gaze, but no data has arrived yet");
 
-            use quaternion_core as quat;
-            let q_gaze_in_view = quat::from_euler_angles(
-                quat::RotationType::Extrinsic,
-                quat::RotationSequence::XYZ,
-                [-gaze.pitch, -gaze.yaw, 0.0],
-            );
+            // println!("{eyes_state:#?}");
+
+            let q_gaze_in_view = quat_from_pitch_yaw(eyes_state.gaze_pitch, eyes_state.gaze_yaw);
             let q_base_in_view: quat::Quaternion<f32> = (
                 base_from_view_space.orientation.w,
                 [
@@ -809,7 +822,7 @@ impl OpenXRLayer {
         unsafe {
             println!("--> create_face_tracker2 {:#?}", *create_info);
 
-            *face_tracker = xr_sys::FaceTracker2FB::from_raw(1);
+            *face_tracker = xr_sys::FaceTracker2FB::from_raw(99999990);
         }
         xr_sys::Result::SUCCESS
     }
@@ -837,7 +850,7 @@ impl OpenXRLayer {
             }
             let face_expressions = std::slice::from_raw_parts_mut(
                 expression_weights.weights,
-                FaceExpression2FB::COUNT.into_raw() as usize,
+                expression_weights.weight_count as usize,
             );
 
             if expression_weights.confidence_count != FaceConfidence2FB::COUNT.into_raw() as u32 {
@@ -845,11 +858,8 @@ impl OpenXRLayer {
             }
             let face_confidences = std::slice::from_raw_parts_mut(
                 expression_weights.confidences,
-                FaceConfidence2FB::COUNT.into_raw() as usize,
+                expression_weights.confidence_count as usize,
             );
-
-            // Very confident...
-            face_confidences.fill(1.0);
 
             // Retrieve the gaze data.
             let eyes_state = OPENXR_OUTPUT_BRIDGE
@@ -857,64 +867,226 @@ impl OpenXRLayer {
                 .expect("requested for gaze, but bridge was not initialized yet")
                 .lock()
                 .expect("failed to lock OpenXR output bridge")
-                .get_state()
-                .expect("requested for gaze, but no data has arrived yet");
+                .get_eyes_state();
+
+            let Some(eyes_state) = eyes_state else {
+                // expression_weights.is_valid = false.into();
+                expression_weights.data_source = xr_sys::FaceTrackingDataSource2FB::VISUAL;
+                expression_weights.is_eye_following_blendshapes_valid = true.into();
+                expression_weights.is_valid = true.into();
+                expression_weights.time = expression_info.time;
+                return xr_sys::Result::SUCCESS;
+            };
+
+            // Very confident...
+            face_confidences.fill(1.0);
 
             let remap = |value: f32, low1: f32, high1: f32, low2: f32, high2: f32| {
                 (low2 + (value - low1) * (high2 - low2) / (high1 - low1)).clamp(0.0, 1.0)
             };
 
-            for (i, mut _face_expression) in face_expressions.iter().enumerate() {
-                _face_expression = &match FaceExpression2FB::from_raw(i as i32) {
+            for (i, mut _face_expression) in face_expressions.iter_mut().enumerate() {
+                *_face_expression = match FaceExpression2FB::from_raw(i as i32) {
                     FaceExpression2FB::UPPER_LID_RAISER_L => {
-                        remap(eyes_state.0.eyelid, 0.75, 1.0, 0.0, 1.0)
+                        remap(eyes_state.l_eyelid, 0.75, 1.0, 0.0, 1.0)
                     }
                     FaceExpression2FB::UPPER_LID_RAISER_R => {
-                        remap(eyes_state.1.eyelid, 0.75, 1.0, 0.0, 1.0)
+                        remap(eyes_state.r_eyelid, 0.75, 1.0, 0.0, 1.0)
                     }
 
                     FaceExpression2FB::EYES_CLOSED_L => {
-                        remap(eyes_state.0.eyelid, 0.75, 0.0, 0.0, 1.0)
+                        remap(eyes_state.l_eyelid, 0.75, 0.0, 0.0, 1.0)
                     }
                     FaceExpression2FB::EYES_CLOSED_R => {
-                        remap(eyes_state.1.eyelid, 0.75, 0.0, 0.0, 1.0)
+                        remap(eyes_state.r_eyelid, 0.75, 0.0, 0.0, 1.0)
                     }
 
                     FaceExpression2FB::EYES_LOOK_LEFT_L => {
-                        remap(eyes_state.0.yaw, 0.0, -45.0, 0.0, 1.0)
-                    },
+                        remap(eyes_state.l_yaw, 0.0, -45.0, 0.0, 1.0)
+                    }
                     FaceExpression2FB::EYES_LOOK_RIGHT_L => {
-                        remap(eyes_state.0.yaw, 0.0, 45.0, 0.0, 1.0)
-                    },
+                        remap(eyes_state.l_yaw, 0.0, 45.0, 0.0, 1.0)
+                    }
                     FaceExpression2FB::EYES_LOOK_UP_L => {
-                        remap(eyes_state.0.pitch, 0.0, 45.0, 0.0, 1.0)
-                    },
+                        remap(eyes_state.pitch, 0.0, 45.0, 0.0, 1.0)
+                    }
                     FaceExpression2FB::EYES_LOOK_DOWN_L => {
-                        remap(eyes_state.0.pitch, 0.0, -45.0, 0.0, 1.0)
-                    },
+                        remap(eyes_state.pitch, 0.0, -45.0, 0.0, 1.0)
+                    }
 
                     FaceExpression2FB::EYES_LOOK_LEFT_R => {
-                        remap(eyes_state.1.yaw, 0.0, -45.0, 0.0, 1.0)
-                    },
+                        remap(eyes_state.r_yaw, 0.0, -45.0, 0.0, 1.0)
+                    }
                     FaceExpression2FB::EYES_LOOK_RIGHT_R => {
-                        remap(eyes_state.1.yaw, 0.0, 45.0, 0.0, 1.0)
-                    },
+                        remap(eyes_state.r_yaw, 0.0, 45.0, 0.0, 1.0)
+                    }
                     FaceExpression2FB::EYES_LOOK_UP_R => {
-                        remap(eyes_state.1.pitch, 0.0, 45.0, 0.0, 1.0)
-                    },
+                        remap(eyes_state.pitch, 0.0, 45.0, 0.0, 1.0)
+                    }
                     FaceExpression2FB::EYES_LOOK_DOWN_R => {
-                        remap(eyes_state.1.pitch, 0.0, -45.0, 0.0, 1.0)
-                    },
+                        remap(eyes_state.pitch, 0.0, -45.0, 0.0, 1.0)
+                    }
 
                     _ => 0.0,
-                }
+                };
+
+                // println!(
+                //     "{:?} = {}",
+                //     FaceExpression2FB::from_raw(i as i32),
+                //     _face_expression
+                // );
             }
 
             expression_weights.data_source = xr_sys::FaceTrackingDataSource2FB::VISUAL;
             expression_weights.is_eye_following_blendshapes_valid = true.into();
             expression_weights.is_valid = true.into();
             expression_weights.time = expression_info.time;
+
+            // println!("{expression_weights:#?}");
         }
+        xr_sys::Result::SUCCESS
+    }
+
+    // XR_FB_eye_tracking_social
+
+    pub unsafe fn create_eye_tracker_fb(
+        &self,
+        _session: xr_sys::Session,
+        create_info: *const xr_sys::EyeTrackerCreateInfoFB,
+        eye_tracker: *mut xr_sys::EyeTrackerFB,
+    ) -> xr_sys::Result {
+        unsafe {
+            println!("--> create_eye_tracker_fb {:#?}", *create_info);
+
+            *eye_tracker = xr_sys::EyeTrackerFB::from_raw(99999991);
+        }
+        xr_sys::Result::SUCCESS
+    }
+
+    pub unsafe fn destroy_eye_tracker(&self, eye_tracker: xr_sys::EyeTrackerFB) -> xr_sys::Result {
+        println!("--> destroy_eye_tracker {:#?}", eye_tracker);
+        xr_sys::Result::SUCCESS
+    }
+
+    pub unsafe fn get_eye_gazes_fb(
+        &self,
+        _eye_tracker: xr_sys::EyeTrackerFB,
+        gaze_info: *const xr_sys::EyeGazesInfoFB,
+        eye_gazes: *mut xr_sys::EyeGazesFB,
+    ) -> xr_sys::Result {
+        // println!("--> destroy_eye_tracker {:#?}", eye_tracker);
+
+        unsafe {
+            let gaze_info = &*gaze_info;
+            let eye_gazes = &mut *eye_gazes;
+
+            // Determine where the VIEW space is in relation to the requested `base_space`.
+            let base_from_view_space = {
+                let mut view_location = xr_sys::SpaceLocation {
+                    ty: xr_sys::StructureType::SPACE_LOCATION,
+                    next: std::ptr::null_mut(),
+                    location_flags: xr_sys::SpaceLocationFlags::EMPTY,
+                    pose: xr_sys::Posef {
+                        orientation: xr_sys::Quaternionf {
+                            x: 0.0,
+                            y: 0.0,
+                            z: 0.0,
+                            w: 1.0,
+                        },
+                        position: xr_sys::Vector3f {
+                            x: 0.0,
+                            y: 0.0,
+                            z: 0.0,
+                        },
+                    },
+                };
+                let result = self.locate_space.unwrap()(
+                    self.view_reference_space.as_ref().unwrap().as_raw(),
+                    gaze_info.base_space,
+                    gaze_info.time,
+                    &mut view_location,
+                );
+                if result != xr_sys::Result::SUCCESS {
+                    return result;
+                }
+                view_location.pose
+            };
+
+            // Those are not defined in `xr_sys`.
+            const EYE_POSITION_LEFT_FB: usize = 0;
+            const EYE_POSITION_RIGHT_FB: usize = 1;
+
+            let eyes_state = OPENXR_OUTPUT_BRIDGE
+                .get()
+                .expect("requested for gaze, but bridge was not initialized yet")
+                .lock()
+                .expect("failed to lock OpenXR output bridge")
+                .get_eyes_state();
+
+            let pitch_yaw_to_pose = |pitch: f32, yaw: f32, is_left: bool| {
+                let mut q_gaze_in_view = quat_from_pitch_yaw(pitch, yaw);
+                q_gaze_in_view.1[0] += if is_left { 0.0325 } else { -0.0325 };
+
+                let q_base_in_view: quat::Quaternion<f32> = (
+                    base_from_view_space.orientation.w,
+                    [
+                        base_from_view_space.orientation.x,
+                        base_from_view_space.orientation.y,
+                        base_from_view_space.orientation.z,
+                    ],
+                );
+
+                // Convert gaze from the VIEW space into `base_space`.
+                let q_gaze_in_base = quat::mul(q_base_in_view, q_gaze_in_view);
+
+                xr_sys::Posef {
+                    orientation: Quaternionf {
+                        w: q_gaze_in_base.0,
+                        x: q_gaze_in_base.1[0],
+                        y: q_gaze_in_base.1[1],
+                        z: q_gaze_in_base.1[2],
+                    },
+                    position: Vector3f {
+                        x: 0.0,
+                        y: 0.0,
+                        z: 0.0,
+                    },
+                }
+            };
+
+            let Some(eyes_state) = eyes_state else {
+                // eye_gazes.gaze[EYE_POSITION_LEFT_FB].is_valid = false.into();
+                // eye_gazes.gaze[EYE_POSITION_RIGHT_FB].is_valid = false.into();
+                eye_gazes.gaze[EYE_POSITION_LEFT_FB] = openxr_sys::EyeGazeFB {
+                    is_valid: true.into(),
+                    gaze_pose: pitch_yaw_to_pose(0.0, 10.0, true),
+                    gaze_confidence: 1.0,
+                };
+                eye_gazes.gaze[EYE_POSITION_RIGHT_FB] = openxr_sys::EyeGazeFB {
+                    is_valid: true.into(),
+                    gaze_pose: pitch_yaw_to_pose(0.0, -10.0, false),
+                    gaze_confidence: 1.0,
+                };
+                eye_gazes.time = gaze_info.time;
+
+                return xr_sys::Result::SUCCESS;
+            };
+
+            eye_gazes.gaze[EYE_POSITION_LEFT_FB] = openxr_sys::EyeGazeFB {
+                is_valid: true.into(),
+                gaze_pose: pitch_yaw_to_pose(eyes_state.pitch, eyes_state.l_yaw, true),
+                gaze_confidence: 1.0,
+            };
+            eye_gazes.gaze[EYE_POSITION_RIGHT_FB] = openxr_sys::EyeGazeFB {
+                is_valid: true.into(),
+                gaze_pose: pitch_yaw_to_pose(eyes_state.pitch, eyes_state.r_yaw, false),
+                gaze_confidence: 1.0,
+            };
+            eye_gazes.time = gaze_info.time;
+
+            // println!("{eye_gazes:#?}");
+        }
+
         xr_sys::Result::SUCCESS
     }
 

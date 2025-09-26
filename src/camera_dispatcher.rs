@@ -9,7 +9,7 @@ use crate::{
 };
 
 #[async_trait]
-pub trait CameraDispatcher: Debug + Send {
+pub trait CameraDispatcher: Debug + Send + Sync {
     async fn dispatch(&self, frame: Frame);
 }
 

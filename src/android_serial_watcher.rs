@@ -11,6 +11,7 @@ use tokio_serial::SerialPort;
 use tokio_stream::StreamExt;
 
 use crate::camera::Frame;
+use crate::camera_dispatcher::CameraDispatcher;
 
 const BAUD_RATE: u32 = 3000000;
 
@@ -59,7 +60,9 @@ impl Iterator for SerialByteStream {
     }
 }
 
-pub fn start_serial_watcher(mac_to_sender: HashMap<String, Sender<Frame>>) -> JoinHandle<()> {
+pub fn start_serial_watcher(
+    mac_to_sender: HashMap<String, Box<dyn CameraDispatcher>>,
+) -> JoinHandle<()> {
     tokio::spawn(async move {
         let mac_to_sender = Arc::new(Mutex::new(mac_to_sender));
 

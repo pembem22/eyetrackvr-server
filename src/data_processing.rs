@@ -45,7 +45,7 @@ pub fn process_gaze(
                     },
                 }
             };
-            
+
             match eyes_gaze {
                 EyesGazeState::Both {
                     l_state: new_l_state,
@@ -83,6 +83,10 @@ pub fn process_gaze(
                         r_yaw: r_state.yaw,
                         l_eyelid: r_state.eyelid,
                         r_eyelid: r_state.eyelid,
+
+                        gaze_pitch: r_state.pitch,
+                        gaze_yaw: r_state.yaw,
+
                         timestamp: r_time,
                     };
                 }
@@ -95,6 +99,10 @@ pub fn process_gaze(
                         r_yaw: l_state.yaw,
                         l_eyelid: l_state.eyelid,
                         r_eyelid: l_state.eyelid,
+
+                        gaze_pitch: l_state.pitch,
+                        gaze_yaw: l_state.yaw,
+
                         timestamp: l_time,
                     };
                 }
@@ -128,6 +136,10 @@ pub fn process_gaze(
                     r_yaw,
                     l_eyelid: l_state.eyelid,
                     r_eyelid: r_state.eyelid,
+
+                    gaze_pitch: avg_pitch,
+                    gaze_yaw: avg_yaw,
+
                     timestamp,
                 }
             };
