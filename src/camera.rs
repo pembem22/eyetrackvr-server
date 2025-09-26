@@ -4,18 +4,9 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-use async_broadcast::Sender;
 use hex_literal::hex;
-use hyper::http;
+use image::RgbImage;
 use image::codecs::jpeg::JpegEncoder;
-use image::{GenericImageView, RgbImage};
-use nokhwa::{
-    pixel_format::RgbFormat,
-    utils::{CameraIndex, RequestedFormat, RequestedFormatType},
-};
-use tokio::{io::AsyncReadExt, task::JoinHandle, time::sleep};
-use tokio_serial::SerialPortBuilderExt;
-use tokio_stream::StreamExt;
 
 const BAUD_RATE: u32 = 3000000;
 

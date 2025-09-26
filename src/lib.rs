@@ -1,20 +1,22 @@
 mod app;
 mod camera;
-mod camera_manager;
+
 mod camera_dispatcher;
 mod camera_server;
 mod camera_sources;
 mod frame_server;
 mod structs;
 
+#[cfg(feature = "desktop")]
+mod camera_manager;
 #[cfg(feature = "gui")]
 mod camera_texture;
 #[cfg(feature = "gui")]
 mod ui;
-#[cfg(all(feature = "gui", target_os = "windows"))]
+#[cfg(all(feature = "gui", feature = "desktop"))]
 mod window_desktop;
 
-#[cfg(all(feature = "gui", target_os = "android"))]
+#[cfg(all(feature = "gui", feature = "android"))]
 mod window_android;
 
 #[cfg(feature = "inference")]
