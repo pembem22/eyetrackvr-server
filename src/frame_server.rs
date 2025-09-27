@@ -49,46 +49,8 @@ pub fn start_frame_server(rx: InactiveReceiver<EyesFrame>) -> JoinHandle<()> {
                             let need_r_view = json.get("r").is_some();
 
                             for _ in 0..FRAMES_PER_CAPTURE {
-                                let frame = loop {
-                                    match rx.recv().await {
-                                        Ok(frame) => break Some(frame),
-                                        Err(e) => {
-                                            match e {
-                                                RecvError::Overflowed(skipped) => {
-                                                    println!("Skipped {skipped} frames");
-                                                    continue;
-                                                }
-                                                RecvError::Closed => {
-                                                    println!("Channel closed");
-                                                    break None;
-                                                }
-                                            };
-                                        }
-                                    }
-                                };
-
-                                let Some(frame) = frame else { return };
-
-                                if frame.frame_type != EyesFrameType::Both {
-                                    eprintln!("Saving mono frames not supported!");
-                                    break;
-                                }
-
-                                let mut views: SmallVec<
-                                    [(
-                                        image::SubImage<
-                                            &image::ImageBuffer<image::Rgb<u8>, Vec<u8>>,
-                                        >,
-                                        char,
-                                    ); 2],
-                                > = smallvec![];
-
-                                if need_l_view {
-                                    views.push((frame.get_left_view().unwrap(), 'L'));
-                                }
-                                if need_r_view {
-                                    views.push((frame.get_right_view().unwrap(), 'R'));
-                                }
+                                let mut need_l_view = need_l_view;
+                                let mut need_r_view = need_r_view;
 
                                 let timestamp: chrono::DateTime<chrono::Local> =
                                     SystemTime::now().into();
@@ -100,6 +62,8 @@ pub fn start_frame_server(rx: InactiveReceiver<EyesFrame>) -> JoinHandle<()> {
 
                                 create_dir_all(file_path.parent().unwrap()).await.unwrap();
 
+                                println!("{file_path_str}");
+
                                 let mut file = fs::OpenOptions::new()
                                     .create_new(true)
                                     .write(true)
@@ -108,26 +72,70 @@ pub fn start_frame_server(rx: InactiveReceiver<EyesFrame>) -> JoinHandle<()> {
                                     .unwrap();
                                 file.write_all(bytes.as_bytes()).await.unwrap();
 
-                                for (frame, letter) in views {
-                                    let file_path =
-                                        format!("./images/{}_{}.jpg", formatted_datetime, letter);
+                                while need_l_view || need_r_view {
+                                    let frame = loop {
+                                        match rx.recv().await {
+                                            Ok(frame) => break Some(frame),
+                                            Err(e) => {
+                                                match e {
+                                                    RecvError::Overflowed(_) => {
+                                                        // println!("Skipped {skipped} frames");
+                                                        continue;
+                                                    }
+                                                    RecvError::Closed => {
+                                                        println!("Channel closed");
+                                                        break None;
+                                                    }
+                                                };
+                                            }
+                                        }
+                                    };
 
-                                    let mut file = fs::OpenOptions::new()
-                                        .create_new(true)
-                                        .write(true)
-                                        .open(file_path)
-                                        .await
-                                        .unwrap();
+                                    let Some(frame) = frame else { return };
 
-                                    let vec = Vec::with_capacity(8192);
-                                    let mut cursor = Cursor::new(vec);
+                                    let mut views: SmallVec<
+                                        [(
+                                            image::SubImage<
+                                                &image::ImageBuffer<image::Rgb<u8>, Vec<u8>>,
+                                            >,
+                                            char,
+                                        ); 2],
+                                    > = smallvec![];
 
-                                    frame
-                                        .to_image()
-                                        .write_with_encoder(PngEncoder::new(&mut cursor))
-                                        .unwrap();
+                                    if need_l_view && let Some(view) = frame.get_left_view() {
+                                        views.push((view, 'L'));
+                                        need_l_view = false;
+                                        println!("L");
+                                    }
+                                    if need_r_view && let Some(view) = frame.get_right_view() {
+                                        views.push((view, 'R'));
+                                        need_r_view = false;
+                                        println!("R");
+                                    }
 
-                                    file.write_all(&cursor.into_inner()).await.unwrap();
+                                    for (frame, letter) in views {
+                                        let file_path = format!(
+                                            "./images/{}_{}.jpg",
+                                            formatted_datetime, letter
+                                        );
+
+                                        let mut file = fs::OpenOptions::new()
+                                            .create_new(true)
+                                            .write(true)
+                                            .open(file_path)
+                                            .await
+                                            .unwrap();
+
+                                        let vec = Vec::with_capacity(8192);
+                                        let mut cursor = Cursor::new(vec);
+
+                                        frame
+                                            .to_image()
+                                            .write_with_encoder(PngEncoder::new(&mut cursor))
+                                            .unwrap();
+
+                                        file.write_all(&cursor.into_inner()).await.unwrap();
+                                    }
                                 }
                             }
 
