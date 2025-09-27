@@ -29,7 +29,10 @@ fn start_android_tasks(app: &App) -> Vec<JoinHandle<()>> {
     let mut tasks = Vec::new();
 
     // HTTP server to mirror the face camera
-    tasks.push(start_camera_server(app.f_cam_rx.clone()));
+    tasks.push(start_camera_server(
+        app.eyes_cam_rx.clone(),
+        app.f_cam_rx.clone(),
+    ));
 
     tasks.push(start_serial_watcher(std::collections::HashMap::from([
         (
