@@ -6,7 +6,7 @@ use pollster::block_on;
 
 use crate::{
     openxr_layer::layer::{EGLPointers, LAYER},
-    ui::{AppRenderer, AppRendererContext},
+    ui::{AppRenderer, AppRendererContext, UI_WINDOW_H, UI_WINDOW_W},
 };
 
 struct ImguiState {
@@ -26,7 +26,7 @@ impl ImguiState {
         let font_size = (13.0 * hidpi_factor) as f32;
         context.io_mut().font_global_scale = (1.0 / hidpi_factor) as f32;
         context.io_mut().display_framebuffer_scale = [hidpi_factor, hidpi_factor];
-        context.io_mut().display_size = [1280.0, 720.0];
+        context.io_mut().display_size = [UI_WINDOW_W as f32, UI_WINDOW_H as f32];
 
         context
             .fonts()
@@ -43,10 +43,10 @@ impl ImguiState {
         // Set up dear imgui wgpu renderer
         //
         let clear_color = wgpu::Color {
-            r: 0.1,
-            g: 0.2,
-            b: 0.3,
-            a: 1.0,
+            r: 0.0,
+            g: 0.0,
+            b: 0.0,
+            a: 0.0,
         };
 
         let renderer_config = imgui_wgpu::RendererConfig {
@@ -139,8 +139,8 @@ impl RenderContext {
         let texture = device.create_texture(&wgpu::wgt::TextureDescriptor {
             label: Some("imgui texture"),
             size: wgpu::Extent3d {
-                width: 1280,
-                height: 720,
+                width: UI_WINDOW_W,
+                height: UI_WINDOW_H,
                 depth_or_array_layers: 1,
             },
             mip_level_count: 1,
@@ -308,11 +308,11 @@ pub fn start_ui(renderer_ctx: AppRendererContext) -> tokio::task::JoinHandle<()>
                 gl.blit_framebuffer(
                     0,
                     0,
-                    1280,
-                    720,
+                    UI_WINDOW_W as i32,
+                    UI_WINDOW_H as i32,
                     0,
-                    720,
-                    1280,
+                    UI_WINDOW_H as i32,
+                    UI_WINDOW_W as i32,
                     0,
                     glow::COLOR_BUFFER_BIT,
                     glow::NEAREST,

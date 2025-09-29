@@ -12,7 +12,7 @@ use winit::{
     window::Window,
 };
 
-use crate::ui::{AppRenderer, AppRendererContext};
+use crate::ui::{AppRenderer, AppRendererContext, UI_WINDOW_H, UI_WINDOW_W};
 
 struct ImguiState {
     context: imgui::Context,
@@ -63,7 +63,7 @@ impl AppWindowContainer {
         });
 
         let window = {
-            let size = LogicalSize::new(1280.0, 720.0);
+            let size = LogicalSize::new(UI_WINDOW_W as f32, UI_WINDOW_H as f32);
 
             let attributes = Window::default_attributes()
                 .with_inner_size(size)

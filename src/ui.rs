@@ -10,6 +10,9 @@ use crate::structs::{CombinedEyeGazeState, Eye, EyesFrame, EyesGazeState};
 use async_broadcast::Receiver;
 use image::{DynamicImage, ImageBuffer, Rgb, SubImage};
 
+pub const UI_WINDOW_W: u32 = 960;
+pub const UI_WINDOW_H: u32 = 540;
+
 pub struct AppRendererContext {
     pub eyes_cam_rx: Receiver<EyesFrame>,
     pub f_rx: Receiver<Frame>,
@@ -121,32 +124,42 @@ impl AppRenderer {
     }
 
     pub(crate) fn render(&self, ui: &imgui::Ui) {
-        ui.window("Camera Feeds").build(move || {
-            let group = ui.begin_group();
-            self.l_texture.build(ui);
-            let l_fps = self.l_texture.get_fps();
-            ui.text(format!("Left Eye, (broken) FPS: {l_fps:03}"));
-            group.end();
-
-            ui.same_line();
-
-            let group = ui.begin_group();
-            self.r_texture.build(ui);
-            let r_fps = self.r_texture.get_fps();
-            ui.text(format!("Right Eye, (broken) FPS: {r_fps:03}"));
-            group.end();
-
-            ui.same_line();
-
-            let group = ui.begin_group();
-            self.f_texture.build(ui);
-            let f_fps = self.f_texture.get_fps();
-            ui.text(format!("Face, (broken) FPS: {f_fps:03}"));
-            group.end();
-        });
+        self.draw_camera_feeds_window(ui);
 
         #[cfg(feature = "inference")]
         self.draw_inference_window(ui);
+    }
+
+    fn draw_camera_feeds_window(&self, ui: &imgui::Ui) {
+        ui.window("Camera Feeds")
+            .position_pivot([0.5f32, 1.0f32])
+            .position(
+                [UI_WINDOW_W as f32 / 2.0, UI_WINDOW_H as f32],
+                imgui::Condition::FirstUseEver,
+            )
+            .build(move || {
+                let group = ui.begin_group();
+                self.l_texture.build(ui);
+                let l_fps = self.l_texture.get_fps();
+                ui.text(format!("Left Eye, (broken) FPS: {l_fps:03}"));
+                group.end();
+
+                ui.same_line();
+
+                let group = ui.begin_group();
+                self.r_texture.build(ui);
+                let r_fps = self.r_texture.get_fps();
+                ui.text(format!("Right Eye, (broken) FPS: {r_fps:03}"));
+                group.end();
+
+                ui.same_line();
+
+                let group = ui.begin_group();
+                self.f_texture.build(ui);
+                let f_fps = self.f_texture.get_fps();
+                ui.text(format!("Face, (broken) FPS: {f_fps:03}"));
+                group.end();
+            });
     }
 
     #[cfg(feature = "inference")]
@@ -154,200 +167,206 @@ impl AppRenderer {
         use crate::camera::CAMERA_FRAME_SIZE;
         use imgui::ImColor32;
 
-        ui.window("Inference").build(move || {
-            // Cropped Camera Feeds
+        ui.window("Inference")
+            .position_pivot([0.5f32, 0.0f32])
+            .position(
+                [UI_WINDOW_W as f32 / 2.0, 0.0],
+                imgui::Condition::FirstUseEver,
+            )
+            .build(move || {
+                // Cropped Camera Feeds
 
-            let draw_cropped_feed = |camera_texture: CameraTexture| {
-                imgui::Image::new(
-                    camera_texture.get_texture_id(),
-                    [FRAME_RESIZE_W as f32, FRAME_RESIZE_H as f32],
-                )
-                .uv0([
-                    1.0 - FRAME_CROP_X as f32 / CAMERA_FRAME_SIZE as f32,
-                    FRAME_CROP_Y as f32 / CAMERA_FRAME_SIZE as f32,
-                ])
-                .uv1([
-                    1.0 - (FRAME_CROP_X + FRAME_CROP_W) as f32 / CAMERA_FRAME_SIZE as f32,
-                    (FRAME_CROP_Y + FRAME_CROP_H) as f32 / CAMERA_FRAME_SIZE as f32,
-                ])
-                .build(ui);
-            };
-
-            ui.text("Cropped Camera Feeds");
-            let group = ui.begin_group();
-            draw_cropped_feed(self.l_texture);
-            ui.same_line();
-            draw_cropped_feed(self.r_texture);
-            group.end();
-
-            // Generic eye state drawer
-
-            let draw_eyelid_state = |eyelid: f32| {
-                const WIDGET_W: f32 = 10.0;
-                const WIDGET_H: f32 = 150.0;
-
-                const COLOR_NORMAL: ImColor32 = ImColor32::from_rgb(0, 148, 255);
-                const COLOR_WIDE: ImColor32 = ImColor32::from_rgb(127, 201, 255);
-
-                const SPLIT_POINT: f32 = 0.75;
-
-                let progress = eyelid;
-
-                let draw_list = ui.get_window_draw_list();
-                let position = ui.cursor_screen_pos();
-
-                let zero_y = position[1] + WIDGET_H;
-                let split_y = position[1] + WIDGET_H * (1.0 - progress.min(SPLIT_POINT));
-                let one_y = position[1] + WIDGET_H * (1.0 - progress);
-
-                draw_list
-                    .add_rect(
-                        [position[0], zero_y],
-                        [position[0] + WIDGET_W, split_y],
-                        COLOR_NORMAL,
+                let draw_cropped_feed = |camera_texture: CameraTexture| {
+                    imgui::Image::new(
+                        camera_texture.get_texture_id(),
+                        [FRAME_RESIZE_W as f32, FRAME_RESIZE_H as f32],
                     )
-                    .filled(true)
-                    .build();
-                draw_list
-                    .add_rect(
-                        [position[0], split_y],
-                        [position[0] + WIDGET_W, one_y],
-                        COLOR_WIDE,
-                    )
-                    .filled(true)
-                    .build();
+                    .uv0([
+                        1.0 - FRAME_CROP_X as f32 / CAMERA_FRAME_SIZE as f32,
+                        FRAME_CROP_Y as f32 / CAMERA_FRAME_SIZE as f32,
+                    ])
+                    .uv1([
+                        1.0 - (FRAME_CROP_X + FRAME_CROP_W) as f32 / CAMERA_FRAME_SIZE as f32,
+                        (FRAME_CROP_Y + FRAME_CROP_H) as f32 / CAMERA_FRAME_SIZE as f32,
+                    ])
+                    .build(ui);
+                };
 
-                // Advance cursor to avoid overlapping with next UI element
-                ui.dummy([WIDGET_W, WIDGET_H]);
-            };
+                ui.text("Cropped Camera Feeds");
+                let group = ui.begin_group();
+                draw_cropped_feed(self.l_texture);
+                ui.same_line();
+                draw_cropped_feed(self.r_texture);
+                group.end();
 
-            let draw_gaze_state = |blue: (f32, f32), red: Option<(f32, f32)>| {
-                const WIDGET_SIZE: f32 = 150.0;
-                const FOV_SIZE: f32 = 0.95;
-                const FOV_RANGE: f32 = 90.0;
-                const FOV_RANGE_DIV_2: f32 = FOV_RANGE / 2.0;
+                // Generic eye state drawer
 
-                const GAZE_RADIUS: f32 = 5.0;
+                let draw_eyelid_state = |eyelid: f32| {
+                    const WIDGET_W: f32 = 10.0;
+                    const WIDGET_H: f32 = 150.0;
 
-                const COLOR_BACKGROUND: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
-                const COLOR_AXES: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
-                const COLOR_CIRCLES: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
-                const COLOR_RAW_GAZE: [f32; 4] = [0.0, 0.1, 0.4, 1.0];
-                const COLOR_PROCESSED_GAZE: [f32; 4] = [0.5, 0.1, 0.1, 1.0];
+                    const COLOR_NORMAL: ImColor32 = ImColor32::from_rgb(0, 148, 255);
+                    const COLOR_WIDE: ImColor32 = ImColor32::from_rgb(127, 201, 255);
 
-                let position = ui.cursor_screen_pos();
-                let size = WIDGET_SIZE;
+                    const SPLIT_POINT: f32 = 0.75;
 
-                let draw_list = ui.get_window_draw_list();
+                    let progress = eyelid;
 
-                // Define the center of the drawing area
-                let center = [position[0] + size * 0.5, position[1] + size * 0.5];
+                    let draw_list = ui.get_window_draw_list();
+                    let position = ui.cursor_screen_pos();
 
-                // Define square corners
-                let top_left = [center[0] - size * 0.5, center[1] - size * 0.5];
-                let bottom_right = [center[0] + size * 0.5, center[1] + size * 0.5];
+                    let zero_y = position[1] + WIDGET_H;
+                    let split_y = position[1] + WIDGET_H * (1.0 - progress.min(SPLIT_POINT));
+                    let one_y = position[1] + WIDGET_H * (1.0 - progress);
 
-                // Draw white square
-                draw_list
-                    .add_rect(top_left, bottom_right, COLOR_BACKGROUND)
-                    .filled(true)
-                    .build();
-
-                // Draw axes
-                draw_list
-                    .add_line(
-                        [center[0], top_left[1]],
-                        [center[0], bottom_right[1]],
-                        COLOR_AXES,
-                    )
-                    .build(); // Vertical axis
-                draw_list
-                    .add_line(
-                        [top_left[0], center[1]],
-                        [bottom_right[0], center[1]],
-                        COLOR_AXES,
-                    )
-                    .build(); // Horizontal axis
-
-                let max_radius = size * FOV_SIZE / 2.0;
-                draw_list
-                    .add_circle(center, max_radius, COLOR_CIRCLES)
-                    .build();
-
-                for i in (15..FOV_RANGE_DIV_2 as i32).step_by(15) {
                     draw_list
-                        .add_circle(
-                            center,
-                            i as f32 / FOV_RANGE_DIV_2 * max_radius,
-                            COLOR_CIRCLES,
-                        )
-                        .build();
-                }
-
-                {
-                    let (pitch, yaw) = blue;
-                    draw_list
-                        .add_circle(
-                            [
-                                center[0] + yaw / FOV_RANGE_DIV_2 * max_radius,
-                                center[1] + pitch / FOV_RANGE_DIV_2 * max_radius,
-                            ],
-                            GAZE_RADIUS,
-                            COLOR_RAW_GAZE,
+                        .add_rect(
+                            [position[0], zero_y],
+                            [position[0] + WIDGET_W, split_y],
+                            COLOR_NORMAL,
                         )
                         .filled(true)
                         .build();
-                }
-
-                if let Some((pitch, yaw)) = red {
                     draw_list
-                        .add_circle(
-                            [
-                                center[0] + yaw / FOV_RANGE_DIV_2 * max_radius,
-                                center[1] + pitch / FOV_RANGE_DIV_2 * max_radius,
-                            ],
-                            GAZE_RADIUS,
-                            COLOR_PROCESSED_GAZE,
+                        .add_rect(
+                            [position[0], split_y],
+                            [position[0] + WIDGET_W, one_y],
+                            COLOR_WIDE,
                         )
                         .filled(true)
                         .build();
-                }
 
-                // Advance cursor to avoid overlapping with next UI element
-                ui.dummy([size, size]);
-            };
+                    // Advance cursor to avoid overlapping with next UI element
+                    ui.dummy([WIDGET_W, WIDGET_H]);
+                };
 
-            // Raw Eye State
+                let draw_gaze_state = |blue: (f32, f32), red: Option<(f32, f32)>| {
+                    const WIDGET_SIZE: f32 = 150.0;
+                    const FOV_SIZE: f32 = 0.95;
+                    const FOV_RANGE: f32 = 90.0;
+                    const FOV_RANGE_DIV_2: f32 = FOV_RANGE / 2.0;
 
-            ui.text("Raw Eye State");
-            let group = ui.begin_group();
-            draw_eyelid_state(self.l_raw_eye.eyelid);
-            ui.same_line();
-            draw_gaze_state((self.l_raw_eye.pitch, self.l_raw_eye.yaw), None);
-            ui.same_line();
-            draw_gaze_state((self.r_raw_eye.pitch, self.r_raw_eye.yaw), None);
-            ui.same_line();
-            draw_eyelid_state(self.r_raw_eye.eyelid);
-            group.end();
+                    const GAZE_RADIUS: f32 = 5.0;
 
-            // Filtered Eye State
+                    const COLOR_BACKGROUND: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
+                    const COLOR_AXES: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
+                    const COLOR_CIRCLES: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
+                    const COLOR_RAW_GAZE: [f32; 4] = [0.0, 0.1, 0.4, 1.0];
+                    const COLOR_PROCESSED_GAZE: [f32; 4] = [0.5, 0.1, 0.1, 1.0];
 
-            ui.text("Filtered Eye State");
-            let group = ui.begin_group();
-            draw_eyelid_state(self.filtered_eyes.l_eyelid);
-            ui.same_line();
-            draw_gaze_state(
-                (self.l_raw_eye.pitch, self.l_raw_eye.yaw),
-                Some((self.filtered_eyes.pitch, self.filtered_eyes.l_yaw)),
-            );
-            ui.same_line();
-            draw_gaze_state(
-                (self.r_raw_eye.pitch, self.r_raw_eye.yaw),
-                Some((self.filtered_eyes.pitch, self.filtered_eyes.r_yaw)),
-            );
-            ui.same_line();
-            draw_eyelid_state(self.filtered_eyes.r_eyelid);
-            group.end();
-        });
+                    let position = ui.cursor_screen_pos();
+                    let size = WIDGET_SIZE;
+
+                    let draw_list = ui.get_window_draw_list();
+
+                    // Define the center of the drawing area
+                    let center = [position[0] + size * 0.5, position[1] + size * 0.5];
+
+                    // Define square corners
+                    let top_left = [center[0] - size * 0.5, center[1] - size * 0.5];
+                    let bottom_right = [center[0] + size * 0.5, center[1] + size * 0.5];
+
+                    // Draw white square
+                    draw_list
+                        .add_rect(top_left, bottom_right, COLOR_BACKGROUND)
+                        .filled(true)
+                        .build();
+
+                    // Draw axes
+                    draw_list
+                        .add_line(
+                            [center[0], top_left[1]],
+                            [center[0], bottom_right[1]],
+                            COLOR_AXES,
+                        )
+                        .build(); // Vertical axis
+                    draw_list
+                        .add_line(
+                            [top_left[0], center[1]],
+                            [bottom_right[0], center[1]],
+                            COLOR_AXES,
+                        )
+                        .build(); // Horizontal axis
+
+                    let max_radius = size * FOV_SIZE / 2.0;
+                    draw_list
+                        .add_circle(center, max_radius, COLOR_CIRCLES)
+                        .build();
+
+                    for i in (15..FOV_RANGE_DIV_2 as i32).step_by(15) {
+                        draw_list
+                            .add_circle(
+                                center,
+                                i as f32 / FOV_RANGE_DIV_2 * max_radius,
+                                COLOR_CIRCLES,
+                            )
+                            .build();
+                    }
+
+                    {
+                        let (pitch, yaw) = blue;
+                        draw_list
+                            .add_circle(
+                                [
+                                    center[0] + yaw / FOV_RANGE_DIV_2 * max_radius,
+                                    center[1] + pitch / FOV_RANGE_DIV_2 * max_radius,
+                                ],
+                                GAZE_RADIUS,
+                                COLOR_RAW_GAZE,
+                            )
+                            .filled(true)
+                            .build();
+                    }
+
+                    if let Some((pitch, yaw)) = red {
+                        draw_list
+                            .add_circle(
+                                [
+                                    center[0] + yaw / FOV_RANGE_DIV_2 * max_radius,
+                                    center[1] + pitch / FOV_RANGE_DIV_2 * max_radius,
+                                ],
+                                GAZE_RADIUS,
+                                COLOR_PROCESSED_GAZE,
+                            )
+                            .filled(true)
+                            .build();
+                    }
+
+                    // Advance cursor to avoid overlapping with next UI element
+                    ui.dummy([size, size]);
+                };
+
+                // Raw Eye State
+
+                ui.text("Raw Eye State");
+                let group = ui.begin_group();
+                draw_eyelid_state(self.l_raw_eye.eyelid);
+                ui.same_line();
+                draw_gaze_state((self.l_raw_eye.pitch, self.l_raw_eye.yaw), None);
+                ui.same_line();
+                draw_gaze_state((self.r_raw_eye.pitch, self.r_raw_eye.yaw), None);
+                ui.same_line();
+                draw_eyelid_state(self.r_raw_eye.eyelid);
+                group.end();
+
+                // Filtered Eye State
+
+                ui.text("Filtered Eye State");
+                let group = ui.begin_group();
+                draw_eyelid_state(self.filtered_eyes.l_eyelid);
+                ui.same_line();
+                draw_gaze_state(
+                    (self.l_raw_eye.pitch, self.l_raw_eye.yaw),
+                    Some((self.filtered_eyes.pitch, self.filtered_eyes.l_yaw)),
+                );
+                ui.same_line();
+                draw_gaze_state(
+                    (self.r_raw_eye.pitch, self.r_raw_eye.yaw),
+                    Some((self.filtered_eyes.pitch, self.filtered_eyes.r_yaw)),
+                );
+                ui.same_line();
+                draw_eyelid_state(self.filtered_eyes.r_eyelid);
+                group.end();
+            });
     }
 }

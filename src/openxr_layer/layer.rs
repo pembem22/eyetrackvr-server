@@ -164,6 +164,8 @@ impl OpenXRLayer {
 
         #[cfg(feature = "gui")]
         {
+            use crate::ui::{UI_WINDOW_H, UI_WINDOW_W};
+
             let swapchain = session
                 .create_swapchain(&xr::SwapchainCreateInfo {
                     create_flags: SwapchainCreateFlags::EMPTY,
@@ -172,8 +174,8 @@ impl OpenXRLayer {
                         | SwapchainUsageFlags::SAMPLED,
                     format: glow::SRGB8_ALPHA8,
                     sample_count: 1,
-                    width: 1280,
-                    height: 720,
+                    width: UI_WINDOW_W,
+                    height: UI_WINDOW_H,
                     face_count: 1,
                     array_size: 1,
                     mip_count: 1,
@@ -325,6 +327,8 @@ impl OpenXRLayer {
 
         #[cfg(feature = "gui")]
         {
+            use crate::ui::{UI_WINDOW_H, UI_WINDOW_W};
+
             let egl_pointers = self.egl_pointers.as_mut().unwrap();
 
             let swapchain = self.debug_window_swapchain.as_mut().unwrap();
@@ -382,7 +386,7 @@ impl OpenXRLayer {
                 ty: xr_sys::StructureType::COMPOSITION_LAYER_QUAD,
                 next: ptr::null(),
                 eye_visibility: EyeVisibility::BOTH,
-                layer_flags: CompositionLayerFlags::EMPTY,
+                layer_flags: CompositionLayerFlags::BLEND_TEXTURE_SOURCE_ALPHA,
                 space: self
                     .view_reference_space
                     .as_ref()
@@ -409,8 +413,8 @@ impl OpenXRLayer {
                     swapchain: self.debug_window_swapchain.as_ref().unwrap().as_raw(),
                     image_rect: Rect2Di {
                         extent: Extent2Di {
-                            width: 1280,
-                            height: 720,
+                            width: UI_WINDOW_W as i32,
+                            height: UI_WINDOW_H as i32,
                         },
                         offset: Offset2Di { x: 0, y: 0 },
                     },
