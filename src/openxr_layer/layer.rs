@@ -784,19 +784,20 @@ impl OpenXRLayer {
 
             let location: &mut openxr_sys::SpaceLocation = &mut *location;
 
-            location.location_flags |= xr_sys::SpaceLocationFlags::POSITION_TRACKED;
-            location.location_flags |= xr_sys::SpaceLocationFlags::ORIENTATION_TRACKED;
-
-            let eyes_state = OPENXR_OUTPUT_BRIDGE
+            let Some(eyes_state) = OPENXR_OUTPUT_BRIDGE
                 .get()
                 .expect("requested for gaze, but bridge was not initialized yet")
                 .lock()
                 .expect("failed to lock OpenXR output bridge")
                 .get_eyes_state()
-                .expect("requested for gaze, but no data has arrived yet");
+            else {
+                location.location_flags &= !xr_sys::SpaceLocationFlags::POSITION_TRACKED;
+                location.location_flags &= !xr_sys::SpaceLocationFlags::ORIENTATION_TRACKED;
+                return xr_sys::Result::SUCCESS;
+            };
 
-            // println!("{eyes_state:#?}");
-
+            location.location_flags |= xr_sys::SpaceLocationFlags::POSITION_TRACKED;
+            location.location_flags |= xr_sys::SpaceLocationFlags::ORIENTATION_TRACKED;
 
             let q_gaze_in_view = quat_from_pitch_yaw(eyes_state.gaze_pitch, eyes_state.gaze_yaw);
             let q_base_in_view: quat::Quaternion<f32> = (
@@ -895,11 +896,7 @@ impl OpenXRLayer {
                 .get_eyes_state();
 
             let Some(eyes_state) = eyes_state else {
-                // expression_weights.is_valid = false.into();
-                expression_weights.data_source = xr_sys::FaceTrackingDataSource2FB::VISUAL;
-                expression_weights.is_eye_following_blendshapes_valid = true.into();
-                expression_weights.is_valid = true.into();
-                expression_weights.time = expression_info.time;
+                expression_weights.is_valid = false.into();
                 return xr_sys::Result::SUCCESS;
             };
 
@@ -1081,19 +1078,8 @@ impl OpenXRLayer {
             };
 
             let Some(eyes_state) = eyes_state else {
-                // eye_gazes.gaze[EYE_POSITION_LEFT_FB].is_valid = false.into();
-                // eye_gazes.gaze[EYE_POSITION_RIGHT_FB].is_valid = false.into();
-                eye_gazes.gaze[EYE_POSITION_LEFT_FB] = openxr_sys::EyeGazeFB {
-                    is_valid: true.into(),
-                    gaze_pose: pitch_yaw_to_pose(0.0, 10.0, true),
-                    gaze_confidence: 1.0,
-                };
-                eye_gazes.gaze[EYE_POSITION_RIGHT_FB] = openxr_sys::EyeGazeFB {
-                    is_valid: true.into(),
-                    gaze_pose: pitch_yaw_to_pose(0.0, -10.0, false),
-                    gaze_confidence: 1.0,
-                };
-                eye_gazes.time = gaze_info.time;
+                eye_gazes.gaze[EYE_POSITION_LEFT_FB].is_valid = false.into();
+                eye_gazes.gaze[EYE_POSITION_RIGHT_FB].is_valid = false.into();
 
                 return xr_sys::Result::SUCCESS;
             };
