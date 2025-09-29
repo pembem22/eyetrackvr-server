@@ -36,5 +36,5 @@ mod android_serial_watcher;
 #[cfg(feature = "openxr-api-layer")]
 mod openxr_layer;
 
-#[cfg(all(feature = "openxr-api-layer", feature = "inference"))]
+#[cfg(all(feature = "openxr-api-layer"))]
 mod openxr_output;

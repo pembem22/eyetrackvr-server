@@ -1,5 +1,6 @@
 use crate::android_serial_watcher::start_serial_watcher;
 use crate::camera_dispatcher::{CameraDispatcher, MonoCameraDispatcher, MonoEyeCameraDispatcher};
+use crate::openxr_output::start_openxr_output;
 use crate::structs::Eye;
 use crate::{app::App, camera_server::start_camera_server};
 use futures::future::try_join_all;
@@ -63,12 +64,16 @@ fn start_android_tasks(app: &App) -> Vec<JoinHandle<()>> {
         ),
     ])));
 
-    tasks.push(start_ui(crate::ui::AppRendererContext {
-        eyes_cam_rx: app.eyes_cam_rx.activate_cloned(),
-        f_rx: app.f_cam_rx.activate_cloned(),
-        raw_eyes_rx: app.raw_eyes_rx.activate_cloned(),
-        combined_eyes_rx: app.combined_eyes_rx.activate_cloned(),
-    }));
+    #[cfg(feature = "gui")]
+    {
+        use crate::window_android::start_ui;
+        tasks.push(start_ui(crate::ui::AppRendererContext {
+            eyes_cam_rx: app.eyes_cam_rx.activate_cloned(),
+            f_rx: app.f_cam_rx.activate_cloned(),
+            raw_eyes_rx: app.raw_eyes_rx.activate_cloned(),
+            combined_eyes_rx: app.combined_eyes_rx.activate_cloned(),
+        }));
+    }
 
     // Inference, process the data, output
 
@@ -76,7 +81,6 @@ fn start_android_tasks(app: &App) -> Vec<JoinHandle<()>> {
     {
         use crate::data_processing::process_gaze;
         use crate::inference::eye_inference;
-        use crate::openxr_output::start_openxr_output;
 
         const THREADS_PER_EYE: usize = 1;
 
@@ -92,11 +96,11 @@ fn start_android_tasks(app: &App) -> Vec<JoinHandle<()>> {
             app.raw_eyes_rx.activate_cloned(),
             app.combined_eyes_tx.clone(),
         ));
-
-        // OpenXR output
-
-        start_openxr_output(&app.combined_eyes_rx);
     }
+
+    // OpenXR output
+
+    start_openxr_output(&app.combined_eyes_rx);
 
     tasks
 }

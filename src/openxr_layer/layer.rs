@@ -1,18 +1,20 @@
 use std::{
+    any::Any,
     collections::HashMap,
     ffi::{c_char, c_void},
     ptr,
     sync::{Condvar, Mutex},
 };
 
+use log::{debug, info, trace};
 use once_cell::sync::Lazy;
 use openxr::{self as xr, FaceConfidence2FB, FaceExpression2FB};
 use openxr_sys::{
     self as xr_sys, BaseInStructure, CompositionLayerBaseHeader, CompositionLayerFlags,
     CompositionLayerQuad, Extent2Df, Extent2Di, EyeVisibility, FrameBeginInfo, FrameEndInfo,
-    GraphicsBindingOpenGLESAndroidKHR, LoaderInitInfoBaseHeaderKHR, Offset2Di, Posef, Quaternionf,
-    Rect2Di, SessionCreateInfo, SwapchainCreateFlags, SwapchainCreateInfo, SwapchainSubImage,
-    SwapchainUsageFlags, Vector3f, pfn,
+    GraphicsBindingOpenGLESAndroidKHR, GraphicsBindingVulkanKHR, LoaderInitInfoBaseHeaderKHR,
+    Offset2Di, Posef, Quaternionf, Rect2Di, SessionCreateInfo, SwapchainCreateFlags,
+    SwapchainCreateInfo, SwapchainSubImage, SwapchainUsageFlags, Vector3f, pfn,
 };
 use quaternion_core as quat;
 
@@ -43,6 +45,7 @@ pub const ADVERTISED_EXTENSIONS: &[Extension] = &[
     },
 ];
 
+#[cfg(feature = "gui")]
 #[derive(Default, Debug)]
 pub struct RenderSignal {
     pub ready: bool,
@@ -50,6 +53,7 @@ pub struct RenderSignal {
     pub condvar: Condvar,
 }
 
+#[cfg(feature = "gui")]
 #[derive(Default, Debug)]
 pub struct EGLPointers {
     pub display: *mut c_void, // EGLDisplay
@@ -57,6 +61,7 @@ pub struct EGLPointers {
     pub context: *mut c_void, // EGLContext
 }
 
+#[cfg(feature = "gui")]
 #[link(name = "EGL")]
 unsafe extern "C" {
     unsafe fn eglMakeCurrent(
@@ -96,15 +101,15 @@ pub struct OpenXRLayer {
     pub create_swapchain: Option<pfn::CreateSwapchain>,
     pub create_reference_space: Option<pfn::CreateReferenceSpace>,
 
-    pub application_vm: *mut c_void,
-    pub application_context: *mut c_void,
-
+    #[cfg(feature = "gui")]
     pub egl_pointers: Option<EGLPointers>,
+    #[cfg(feature = "gui")]
     pub egl_image: u32,
+    #[cfg(feature = "gui")]
     swapchain_images: Vec<u32>,
-
+    #[cfg(feature = "gui")]
     pub render_signal: RenderSignal,
-
+    #[cfg(feature = "gui")]
     debug_window_swapchain: Option<xr::Swapchain<xr::OpenGlEs>>,
 
     view_reference_space: Option<xr::Space>,
@@ -138,38 +143,45 @@ impl OpenXRLayer {
             begin_frame: None,
             create_reference_space: None,
             possible_spaces: HashMap::new(),
-            application_context: ptr::null_mut(),
-            application_vm: ptr::null_mut(),
 
+            #[cfg(feature = "gui")]
             egl_pointers: None,
+            #[cfg(feature = "gui")]
             egl_image: Default::default(),
+            #[cfg(feature = "gui")]
             swapchain_images: Default::default(),
-
+            #[cfg(feature = "gui")]
             render_signal: Default::default(),
-
+            #[cfg(feature = "gui")]
             debug_window_swapchain: None,
+
             view_reference_space: None,
         }
     }
 
     fn on_session_created(&mut self) {
         let session = self.session.as_ref().unwrap();
-        let swapchain = session
-            .create_swapchain(&xr::SwapchainCreateInfo {
-                create_flags: SwapchainCreateFlags::EMPTY,
-                // TODO: Set the proper flags, those are copied from Steam Link.
-                usage_flags: SwapchainUsageFlags::COLOR_ATTACHMENT | SwapchainUsageFlags::SAMPLED,
-                format: glow::SRGB8_ALPHA8,
-                sample_count: 1,
-                width: 1280,
-                height: 720,
-                face_count: 1,
-                array_size: 1,
-                mip_count: 1,
-            })
-            .expect("failed to create swapchain");
-        self.swapchain_images = swapchain.enumerate_images().unwrap();
-        self.debug_window_swapchain = Some(swapchain);
+
+        #[cfg(feature = "gui")]
+        {
+            let swapchain = session
+                .create_swapchain(&xr::SwapchainCreateInfo {
+                    create_flags: SwapchainCreateFlags::EMPTY,
+                    // TODO: Set the proper flags, those are copied from Steam Link.
+                    usage_flags: SwapchainUsageFlags::COLOR_ATTACHMENT
+                        | SwapchainUsageFlags::SAMPLED,
+                    format: glow::SRGB8_ALPHA8,
+                    sample_count: 1,
+                    width: 1280,
+                    height: 720,
+                    face_count: 1,
+                    array_size: 1,
+                    mip_count: 1,
+                })
+                .expect("failed to create swapchain");
+            self.swapchain_images = swapchain.enumerate_images().unwrap();
+            self.debug_window_swapchain = Some(swapchain);
+        }
 
         self.view_reference_space = Some(
             session
@@ -188,26 +200,36 @@ impl OpenXRLayer {
             let create_info = &*create_info;
             let next = &*(create_info.next as *const BaseInStructure);
 
-            println!("create_info {create_info:?}");
-            println!("create_info.next {next:?}");
+            debug!("create_info {create_info:?}");
+            debug!("create_info.next {next:?}");
 
-            assert_eq!(
-                next.ty,
-                xr_sys::StructureType::GRAPHICS_BINDING_OPENGL_ES_ANDROID_KHR
-            );
+            match next.ty {
+                xr_sys::StructureType::GRAPHICS_BINDING_OPENGL_ES_ANDROID_KHR => {
+                    let graphics_binding_open_glesandroid_khr =
+                        &*(create_info.next as *mut GraphicsBindingOpenGLESAndroidKHR);
+                    info!(
+                        "graphics_binding_open_glesandroid_khr {graphics_binding_open_glesandroid_khr:#?}"
+                    );
 
-            let graphics_binding_open_glesandroid_khr =
-                &*(create_info.next as *mut GraphicsBindingOpenGLESAndroidKHR);
-
-            println!(
-                "graphics_binding_open_glesandroid_khr {graphics_binding_open_glesandroid_khr:?}"
-            );
-
-            self.egl_pointers = Some(EGLPointers {
-                config: graphics_binding_open_glesandroid_khr.config,
-                context: graphics_binding_open_glesandroid_khr.context,
-                display: graphics_binding_open_glesandroid_khr.display,
-            });
+                    #[cfg(feature = "gui")]
+                    {
+                        self.egl_pointers = Some(EGLPointers {
+                            config: graphics_binding_open_glesandroid_khr.config,
+                            context: graphics_binding_open_glesandroid_khr.context,
+                            display: graphics_binding_open_glesandroid_khr.display,
+                        });
+                    }
+                }
+                // `xr_sys::StructureType::GRAPHICS_BINDING_VULKAN2_KHR` is an alias for the one below.
+                xr_sys::StructureType::GRAPHICS_BINDING_VULKAN_KHR => {
+                    let graphics_binding_vulkan_khr =
+                        &*(create_info.next as *mut GraphicsBindingVulkanKHR);
+                    info!(
+                        "graphics_binding_vulkan_khr {graphics_binding_vulkan_khr:#?}"
+                    );
+                }
+                _ => {}
+            }
 
             let result = self.create_session.unwrap()(instance, create_info, session);
 
@@ -249,9 +271,6 @@ impl OpenXRLayer {
                 loader_init_info_android.application_vm,
                 loader_init_info_android.application_context,
             );
-
-            // self.application_context = loader_init_info_android.application_context;
-            // self.application_vm = loader_init_info_android.application_vm;
 
             // From the OpenXR specs:
             // If the xrInitializeLoaderKHR function is discovered through the manifest,
@@ -295,117 +314,119 @@ impl OpenXRLayer {
         session: xr_sys::Session,
         frame_end_info: *const FrameEndInfo,
     ) -> xr_sys::Result {
-        let egl_pointers = self.egl_pointers.as_mut().unwrap();
-
-        let swapchain = self.debug_window_swapchain.as_mut().unwrap();
-        let image_index = swapchain.acquire_image().unwrap();
-        swapchain.wait_image(xr::Duration::INFINITE).unwrap();
-
-        self.egl_image = self.swapchain_images[image_index as usize];
-
-        // (Steam Link) Unbind the context from the thread, assuming it's here.
-        unsafe {
-            eglMakeCurrent(
-                egl_pointers.display,
-                ptr::null_mut(),
-                ptr::null_mut(),
-                ptr::null_mut(),
-            )
-        };
-
-        // Wake up the render thread.
-        {
-            let mut ready = self.render_signal.mutex.lock().unwrap();
-            *ready = true;
-            self.render_signal.condvar.notify_one();
-        }
-
-        // Render thread does the rendering.
-
-        // Wait for the render thread to finish.
-        {
-            let mut ready = self.render_signal.mutex.lock().unwrap();
-            while *ready {
-                ready = self.render_signal.condvar.wait(ready).unwrap();
-            }
-        }
-
-        // (Steam Link) Bind the context back.
-        unsafe {
-            eglMakeCurrent(
-                egl_pointers.display,
-                ptr::null_mut(),
-                ptr::null_mut(),
-                egl_pointers.context,
-            )
-        };
-
-        swapchain.release_image().unwrap();
-
         // Create our copy of FrameEndInfo.
         let mut frame_end_info = unsafe { *frame_end_info };
 
-        let original_layer_count = frame_end_info.layer_count as usize;
-        let original_layers =
-            unsafe { std::slice::from_raw_parts(frame_end_info.layers, original_layer_count) };
+        let mut owned = Vec::<Box<dyn Any>>::new();
 
-        // TODO: Don't reallocate every frame.
-        let mut layers = Vec::<*const CompositionLayerBaseHeader>::new();
-        layers.reserve_exact(original_layer_count + 1);
-        layers.extend_from_slice(original_layers);
+        let mut layers = Vec::from(unsafe {
+            std::slice::from_raw_parts(frame_end_info.layers, frame_end_info.layer_count as usize)
+        });
 
-        let q = quat::from_euler_angles(
-            quat::RotationType::Extrinsic,
-            quat::RotationSequence::XYZ,
-            [-45f32.to_radians(), 0.0, 0.0],
-        );
+        #[cfg(feature = "gui")]
+        {
+            let egl_pointers = self.egl_pointers.as_mut().unwrap();
 
-        let my_layer = CompositionLayerQuad {
-            ty: xr_sys::StructureType::COMPOSITION_LAYER_QUAD,
-            next: ptr::null(),
-            eye_visibility: EyeVisibility::BOTH,
-            layer_flags: CompositionLayerFlags::EMPTY,
-            space: self
-                .view_reference_space
-                .as_ref()
-                .expect("view reference space is not initialized")
-                .as_raw(),
-            pose: Posef {
-                position: Vector3f {
-                    x: 0.0,
-                    y: -0.10,
-                    z: -0.20,
-                },
-                orientation: Quaternionf {
-                    w: q.0,
-                    x: q.1[0],
-                    y: q.1[1],
-                    z: q.1[2],
-                },
-            },
-            size: Extent2Df {
-                width: 0.16,
-                height: 0.09,
-            },
-            sub_image: SwapchainSubImage {
-                swapchain: self.debug_window_swapchain.as_ref().unwrap().as_raw(),
-                image_rect: Rect2Di {
-                    extent: Extent2Di {
-                        width: 1280,
-                        height: 720,
+            let swapchain = self.debug_window_swapchain.as_mut().unwrap();
+            let image_index = swapchain.acquire_image().unwrap();
+            swapchain.wait_image(xr::Duration::INFINITE).unwrap();
+
+            self.egl_image = self.swapchain_images[image_index as usize];
+
+            // (Steam Link) Unbind the context from the thread, assuming it's here.
+            unsafe {
+                eglMakeCurrent(
+                    egl_pointers.display,
+                    ptr::null_mut(),
+                    ptr::null_mut(),
+                    ptr::null_mut(),
+                )
+            };
+
+            // Wake up the render thread.
+            {
+                let mut ready = self.render_signal.mutex.lock().unwrap();
+                *ready = true;
+                self.render_signal.condvar.notify_one();
+            }
+
+            // Render thread does the rendering.
+
+            // Wait for the render thread to finish.
+            {
+                let mut ready = self.render_signal.mutex.lock().unwrap();
+                while *ready {
+                    ready = self.render_signal.condvar.wait(ready).unwrap();
+                }
+            }
+
+            // (Steam Link) Bind the context back.
+            unsafe {
+                eglMakeCurrent(
+                    egl_pointers.display,
+                    ptr::null_mut(),
+                    ptr::null_mut(),
+                    egl_pointers.context,
+                )
+            };
+
+            swapchain.release_image().unwrap();
+
+            let q = quat::from_euler_angles(
+                quat::RotationType::Extrinsic,
+                quat::RotationSequence::XYZ,
+                [-45f32.to_radians(), 0.0, 0.0],
+            );
+
+            let my_layer = Box::new(CompositionLayerQuad {
+                ty: xr_sys::StructureType::COMPOSITION_LAYER_QUAD,
+                next: ptr::null(),
+                eye_visibility: EyeVisibility::BOTH,
+                layer_flags: CompositionLayerFlags::EMPTY,
+                space: self
+                    .view_reference_space
+                    .as_ref()
+                    .expect("view reference space is not initialized")
+                    .as_raw(),
+                pose: Posef {
+                    position: Vector3f {
+                        x: 0.0,
+                        y: -0.10,
+                        z: -0.20,
                     },
-                    offset: Offset2Di { x: 0, y: 0 },
+                    orientation: Quaternionf {
+                        w: q.0,
+                        x: q.1[0],
+                        y: q.1[1],
+                        z: q.1[2],
+                    },
                 },
-                image_array_index: 0,
-            },
-        };
+                size: Extent2Df {
+                    width: 0.16,
+                    height: 0.09,
+                },
+                sub_image: SwapchainSubImage {
+                    swapchain: self.debug_window_swapchain.as_ref().unwrap().as_raw(),
+                    image_rect: Rect2Di {
+                        extent: Extent2Di {
+                            width: 1280,
+                            height: 720,
+                        },
+                        offset: Offset2Di { x: 0, y: 0 },
+                    },
+                    image_array_index: 0,
+                },
+            });
 
-        // TODO: Is there a better way to do this cast?
-        layers
-            .push((&my_layer as *const CompositionLayerQuad) as *const CompositionLayerBaseHeader);
+            // TODO: Is there a better way to do this cast?
+            layers.push(
+                (&*my_layer as *const CompositionLayerQuad) as *const CompositionLayerBaseHeader,
+            );
+            owned.push(my_layer);
+        }
 
-        frame_end_info.layer_count = layers.len() as u32;
         frame_end_info.layers = layers.as_ptr();
+        frame_end_info.layer_count = layers.len() as u32;
 
         assert_eq!(
             unsafe { self.end_frame.unwrap()(session, &frame_end_info) },
@@ -715,8 +736,6 @@ impl OpenXRLayer {
         location: *mut xr_sys::SpaceLocation,
     ) -> xr_sys::Result {
         unsafe {
-            // println!("--> locate_space {:?} {:?} {:?}", space, base_space, time);
-
             // If the requested space is not eye tracking space, pass through the call.
             if self
                 .eye_gaze_space
@@ -725,8 +744,7 @@ impl OpenXRLayer {
                 return self.locate_space.unwrap()(space, base_space, time, location);
             }
 
-            // println!("--> eye gaze {:?} {:?} {:?}", space, base_space, time);
-            // println!("locate_space {:?} {:?}", space, base_space);
+            trace!("--> locate_space {:?} {:?} {:?}", space, base_space, time);
 
             // Determine where the VIEW space is in relation to the requested `base_space`.
             let base_from_view_space = {
@@ -774,6 +792,7 @@ impl OpenXRLayer {
                 .expect("requested for gaze, but no data has arrived yet");
 
             // println!("{eyes_state:#?}");
+
 
             let q_gaze_in_view = quat_from_pitch_yaw(eyes_state.gaze_pitch, eyes_state.gaze_yaw);
             let q_base_in_view: quat::Quaternion<f32> = (
@@ -958,7 +977,7 @@ impl OpenXRLayer {
         eye_tracker: *mut xr_sys::EyeTrackerFB,
     ) -> xr_sys::Result {
         unsafe {
-            println!("--> create_eye_tracker_fb {:#?}", *create_info);
+            debug!("--> create_eye_tracker_fb {:#?}", *create_info);
 
             *eye_tracker = xr_sys::EyeTrackerFB::from_raw(99999991);
         }
@@ -966,7 +985,7 @@ impl OpenXRLayer {
     }
 
     pub unsafe fn destroy_eye_tracker(&self, eye_tracker: xr_sys::EyeTrackerFB) -> xr_sys::Result {
-        println!("--> destroy_eye_tracker {:#?}", eye_tracker);
+        debug!("--> destroy_eye_tracker {:#?}", eye_tracker);
         xr_sys::Result::SUCCESS
     }
 
@@ -978,7 +997,7 @@ impl OpenXRLayer {
     ) -> xr_sys::Result {
         unsafe {
             let gaze_info = &*gaze_info;
-            // println!("--> get_eye_gazes_fb {:?}", gaze_info);
+            trace!("--> get_eye_gazes_fb {gaze_info:?}, eye_gazes: {eye_gazes:?}");
             let eye_gazes = &mut *eye_gazes;
 
             // Determine where the VIEW space is in relation to the requested `base_space`.
