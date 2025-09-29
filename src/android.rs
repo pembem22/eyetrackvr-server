@@ -3,26 +3,39 @@ use crate::camera_dispatcher::{CameraDispatcher, MonoCameraDispatcher, MonoEyeCa
 use crate::structs::Eye;
 use crate::{app::App, camera_server::start_camera_server};
 use futures::future::try_join_all;
+use log::{LevelFilter, info};
 use tokio::task::JoinHandle;
 
-use crate::window_android::start_ui;
+pub fn init_logger() {
+    android_logger::init_once(
+        android_logger::Config::default()
+            .with_max_level(LevelFilter::Trace) // limit log level
+            .with_tag("RUST_ETFT") // logs will show under mytag tag
+            .with_filter(
+                android_logger::FilterBuilder::new()
+                    .parse("info,eyetrackvr_server=trace")
+                    .build(),
+            ),
+    );
+
+    info!("Initalized android_logger");
+}
 
 pub fn main() {
-    env_logger::builder().format_timestamp(None).init();
-
-    println!("Hello from Android main!");
+    info!("Hello from Android main!");
 
     std::thread::spawn(|| {
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
-            println!("Hello from Tokio runtime!");
+            info!("Hello from Tokio runtime!");
 
             let app = App::new();
 
             try_join_all(start_android_tasks(&app)).await.unwrap()
         });
     });
-    println!("Started Tokio runtime thread");
+
+    info!("Started Tokio runtime thread");
 }
 
 fn start_android_tasks(app: &App) -> Vec<JoinHandle<()>> {

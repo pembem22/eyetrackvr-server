@@ -7,6 +7,8 @@ use std::ffi::c_char;
 use crate::openxr_layer::layer::ADVERTISED_EXTENSIONS;
 use crate::openxr_layer::layer::LAYER;
 
+use log::debug;
+
 use openxr::SystemId;
 use openxr::Time;
 use openxr::{self as xr};
@@ -35,9 +37,7 @@ use openxr_sys::Swapchain;
 use openxr_sys::SwapchainCreateInfo;
 use openxr_sys::SystemProperties;
 use openxr_sys::{Instance, Result, pfn};
-
 use openxr_sys::{InstanceCreateInfo, loader::ApiLayerCreateInfo};
-
 use openxr_sys::{
     loader,
     loader::{XrNegotiateApiLayerRequest, XrNegotiateLoaderInfo},
@@ -51,8 +51,10 @@ pub unsafe extern "C" fn xrNegotiateLoaderApiLayerInterface(
     _api_layer_name: *mut c_char,
     api_layer_request_ptr: *mut XrNegotiateApiLayerRequest,
 ) -> openxr_sys::Result {
+    crate::android::init_logger();
+
     unsafe {
-        println!("--> xrNegotiateLoaderApiLayerInterface");
+        debug!("--> xrNegotiateLoaderApiLayerInterface");
 
         // if (apiLayerName && std::string_view(apiLayerName) != LAYER_NAME) {
         //     ErrorLog(fmt::format("Invalid apiLayerName \"{}\"\n", apiLayerName));
@@ -108,7 +110,7 @@ pub unsafe extern "C" fn xrNegotiateLoaderApiLayerInterface(
         // apiLayerRequest->getInstanceProcAddr = reinterpret_cast<PFN_xrGetInstanceProcAddr>(xrGetInstanceProcAddr);
         // apiLayerRequest->createApiLayerInstance = reinterpret_cast<PFN_xrCreateApiLayerInstance>(xrCreateApiLayerInstance);
 
-        println!("<-- xrNegotiateLoaderApiLayerInterface");
+        debug!("<-- xrNegotiateLoaderApiLayerInterface");
 
         openxr_sys::Result::SUCCESS
     }
@@ -120,7 +122,7 @@ pub unsafe extern "system" fn xr_create_api_layer_instance(
     instance: *mut Instance,
 ) -> Result {
     unsafe {
-        println!("--> xr_create_api_layer_instance");
+        debug!("--> xr_create_api_layer_instance");
 
         let mut chain_instance_create_info = *instance_create_info_ptr;
 
@@ -160,7 +162,7 @@ pub unsafe extern "system" fn xr_create_api_layer_instance(
             instance,
         );
 
-        println!("xr_create_api_layer_instance result: {result:?}");
+        debug!("xr_create_api_layer_instance result: {result:?}");
 
         if result != Result::SUCCESS {
             return result;
@@ -182,7 +184,7 @@ pub unsafe extern "system" fn xr_create_api_layer_instance(
 
         crate::android::main();
 
-        println!("<-- xr_create_api_layer_instance");
+        debug!("<-- xr_create_api_layer_instance");
 
         Result::SUCCESS
     }
@@ -219,7 +221,7 @@ pub unsafe extern "system" fn xr_get_instance_proc_addr(
             return Result::ERROR_HANDLE_INVALID;
         }
 
-        println!(
+        debug!(
             "xr_get_instance_proc_addr {:?} {}",
             instance,
             CStr::from_ptr(name_ptr).to_str().unwrap()
