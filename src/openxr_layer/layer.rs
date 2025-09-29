@@ -18,7 +18,6 @@ use quaternion_core as quat;
 
 #[cfg(feature = "android")]
 use openxr_sys::LoaderInitInfoAndroidKHR;
-use rand::Rng;
 
 use crate::openxr_output::OPENXR_OUTPUT_BRIDGE;
 
