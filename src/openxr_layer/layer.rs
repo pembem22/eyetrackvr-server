@@ -12,14 +12,12 @@ use openxr::{self as xr, FaceConfidence2FB, FaceExpression2FB};
 use openxr_sys::{
     self as xr_sys, BaseInStructure, CompositionLayerBaseHeader, CompositionLayerFlags,
     CompositionLayerQuad, Extent2Df, Extent2Di, EyeVisibility, FrameBeginInfo, FrameEndInfo,
-    GraphicsBindingOpenGLESAndroidKHR, GraphicsBindingVulkanKHR, LoaderInitInfoBaseHeaderKHR,
-    Offset2Di, Posef, Quaternionf, Rect2Di, SessionCreateInfo, SwapchainCreateFlags,
-    SwapchainCreateInfo, SwapchainSubImage, SwapchainUsageFlags, Vector3f, pfn,
+    GraphicsBindingOpenGLESAndroidKHR, GraphicsBindingVulkanKHR, LoaderInitInfoAndroidKHR,
+    LoaderInitInfoBaseHeaderKHR, Offset2Di, Posef, Quaternionf, Rect2Di, SessionCreateInfo,
+    SwapchainCreateFlags, SwapchainCreateInfo, SwapchainSubImage, SwapchainUsageFlags, Vector3f,
+    pfn,
 };
 use quaternion_core as quat;
-
-#[cfg(feature = "android")]
-use openxr_sys::LoaderInitInfoAndroidKHR;
 
 use crate::openxr_output::OPENXR_OUTPUT_BRIDGE;
 
@@ -226,9 +224,7 @@ impl OpenXRLayer {
                 xr_sys::StructureType::GRAPHICS_BINDING_VULKAN_KHR => {
                     let graphics_binding_vulkan_khr =
                         &*(create_info.next as *mut GraphicsBindingVulkanKHR);
-                    info!(
-                        "graphics_binding_vulkan_khr {graphics_binding_vulkan_khr:#?}"
-                    );
+                    info!("graphics_binding_vulkan_khr {graphics_binding_vulkan_khr:#?}");
                 }
                 _ => {}
             }

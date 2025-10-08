@@ -51,7 +51,7 @@ pub unsafe extern "C" fn xrNegotiateLoaderApiLayerInterface(
     _api_layer_name: *mut c_char,
     api_layer_request_ptr: *mut XrNegotiateApiLayerRequest,
 ) -> openxr_sys::Result {
-    crate::android::init_logger();
+    crate::logging::setup_logging();
 
     unsafe {
         debug!("--> xrNegotiateLoaderApiLayerInterface");
@@ -182,7 +182,7 @@ pub unsafe extern "system" fn xr_create_api_layer_instance(
         layer.get_instance_proc_addr = Some(get_instance_proc_addr);
         layer.instance = Some(instance);
 
-        crate::android::main();
+        crate::android_openxr_layer::main();
 
         debug!("<-- xr_create_api_layer_instance");
 

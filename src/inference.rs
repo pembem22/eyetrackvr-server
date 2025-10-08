@@ -1,5 +1,6 @@
 use async_broadcast::{Receiver, RecvError, Sender};
 use image::{DynamicImage, GenericImageView};
+use log::{error, warn};
 use ort::{
     session::{Session, builder::GraphOptimizationLevel},
     value::TensorRef,
@@ -53,11 +54,11 @@ pub fn eye_inference(
                     Ok(eyes_frame) => break eyes_frame,
                     Err(e) => match e {
                         RecvError::Overflowed(skipped) => {
-                            println!("Skipped {skipped} frames");
+                            warn!("Skipped {skipped} frames");
                             continue;
                         }
                         RecvError::Closed => {
-                            println!("Channel closed");
+                            error!("Channel closed");
                             return;
                         }
                     },

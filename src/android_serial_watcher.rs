@@ -5,6 +5,7 @@ use std::time::{Duration, SystemTime};
 
 use android_usbser::{CdcSerial, usb};
 use hex_literal::hex;
+use log::{debug, error, info, warn};
 use pollster::FutureExt;
 use tokio::task::JoinHandle;
 use tokio_serial::SerialPort;
@@ -12,6 +13,7 @@ use tokio_stream::StreamExt;
 
 use crate::camera::Frame;
 use crate::camera_dispatcher::CameraDispatcher;
+use crate::camera_sources::FpsCounter;
 
 const BAUD_RATE: u32 = 3000000;
 
@@ -75,18 +77,42 @@ pub fn start_serial_watcher(
             match devices_stream.next().await {
                 None => continue,
                 Some(usb::HotplugEvent::Connected(dev)) => {
-                    let dev_info = if dev.has_permission().unwrap() {
+                    debug!("New USB device: {dev:#?}");
+
+                    let has_permission = match dev.has_permission() {
+                        Ok(has_permission) => has_permission,
+                        Err(err) => {
+                            error!("Failed to check if have USB permission: {err:?}");
+                            continue;
+                        }
+                    };
+
+                    let dev_info = if has_permission {
+                        info!("Already have device permission");
                         dev
                     } else {
-                        let perm_req = dev.request_permission().unwrap_or(None);
-                        if perm_req.is_some() {
-                            println!("Performing permission request...");
-                            if !perm_req.unwrap().await {
-                                println!("Permission denied.");
+                        info!("Performing permission request");
+                        match dev.request_permission() {
+                            Ok(perm_req) => match perm_req {
+                                Some(perm_req) => {
+                                    info!("Waiting for a permission request response...");
+                                    if !perm_req.await {
+                                        info!("Permission denied.");
+                                        continue;
+                                    }
+                                    info!("Permission allowed");
+                                    dev
+                                }
+                                None => {
+                                    error!("Falied to request permission");
+                                    continue;
+                                }
+                            },
+                            Err(err) => {
+                                error!("Failed to request USB permission: {err:?}");
                                 continue;
                             }
                         }
-                        dev
                     };
 
                     // let Ok(conn) = dev_info.open_device() else {
@@ -104,35 +130,37 @@ pub fn start_serial_watcher(
                         .serial_number()
                         .clone()
                     else {
-                        println!("Serial is None, skipping");
+                        info!("Serial is None, skipping");
                         continue;
                     };
 
-                    println!("Serial {serial_num:?}");
+                    info!("Serial {serial_num:?}");
 
                     let Some(dispatcher) = mac_to_sender.lock().unwrap().remove(&serial_num) else {
-                        println!("Serial {serial_num:?} is not recognized");
+                        info!("Serial {serial_num:?} is not recognized");
                         continue;
                     };
 
-                    println!("Recognized serial {serial_num:?}");
+                    info!("Recognized serial {serial_num:?}");
 
                     tokio::task::spawn_blocking(move || {
-                        println!("Started blocking task for serial {serial_num}");
+                        info!("Started blocking task for serial {serial_num}");
                         let mut serial =
                             CdcSerial::build(&dev_info, Duration::from_millis(300)).unwrap();
-                        println!("Opened, setting config...");
+                        info!("Opened, setting config...");
                         serial.set_baud_rate(BAUD_RATE).unwrap();
                         serial.set_parity(tokio_serial::Parity::None).unwrap();
                         serial.set_data_bits(tokio_serial::DataBits::Eight).unwrap();
                         serial.set_stop_bits(tokio_serial::StopBits::One).unwrap();
-                        println!("Configuration set.");
+                        info!("Configuration set.");
 
                         let mut stream = SerialByteStream::new(serial);
                         let mut last_bytes = [0u8; 6];
                         let mut collecting = false;
                         let mut image_data = Vec::with_capacity(8192);
                         let mut image_size = 0;
+
+                        let mut fps = FpsCounter::new();
 
                         while let Some(byte) = stream.next() {
                             // Shift the buffer and add the new byte.
@@ -141,6 +169,9 @@ pub fn start_serial_watcher(
                             last_bytes[last_bytes.len() - 1] = byte;
 
                             if collecting && image_data.len() == image_size {
+                                // println!("{serial_num}:");
+                                fps.update_fps();
+
                                 // Process the collected image.
                                 let mut decoder = image::ImageReader::new(Cursor::new(&image_data));
                                 decoder.set_format(image::ImageFormat::Jpeg);
@@ -154,7 +185,7 @@ pub fn start_serial_watcher(
                                     };
                                     dispatcher.dispatch(new_frame).block_on();
                                 } else {
-                                    println!("Warning: failed to decode image");
+                                    warn!("failed to decode image");
                                 }
 
                                 collecting = false;
@@ -172,11 +203,11 @@ pub fn start_serial_watcher(
 
                         mac_to_sender.lock().unwrap().insert(serial_num, dispatcher);
 
-                        println!("Serial stream ended");
+                        info!("Serial stream ended");
                     });
                 }
                 Some(usb::HotplugEvent::Disconnected(dev)) => {
-                    println!("Device disconnected ({}).", dev.path_name());
+                    info!("Device disconnected ({}).", dev.path_name());
                     continue;
                 }
             }

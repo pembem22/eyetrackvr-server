@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use async_broadcast::{Receiver, RecvError, Sender};
+use log::{error, warn};
 use tokio::task::JoinHandle;
 
 use crate::structs::{CombinedEyeGazeState, Eye, EyeGazeState, EyesGazeState, ZERO_TIMESTAMP};
@@ -35,11 +36,11 @@ pub fn process_gaze(
                     Ok(eyes_frame) => break eyes_frame,
                     Err(e) => match e {
                         RecvError::Overflowed(skipped) => {
-                            println!("Skipped {skipped} frames");
+                            warn!("Skipped {skipped} frames");
                             continue;
                         }
                         RecvError::Closed => {
-                            println!("Channel closed");
+                            error!("Channel closed");
                             return;
                         }
                     },

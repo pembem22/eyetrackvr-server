@@ -7,20 +7,7 @@ use futures::future::try_join_all;
 use log::{LevelFilter, info};
 use tokio::task::JoinHandle;
 
-pub fn init_logger() {
-    android_logger::init_once(
-        android_logger::Config::default()
-            .with_max_level(LevelFilter::Trace) // limit log level
-            .with_tag("RUST_ETFT") // logs will show under mytag tag
-            .with_filter(
-                android_logger::FilterBuilder::new()
-                    .parse("info,eyetrackvr_server=trace")
-                    .build(),
-            ),
-    );
 
-    info!("Initalized android_logger");
-}
 
 pub fn main() {
     info!("Hello from Android main!");

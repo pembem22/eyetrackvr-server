@@ -9,6 +9,7 @@ use hyper::{
     service::{make_service_fn, service_fn},
 };
 use image::codecs::jpeg::JpegEncoder;
+use log::info;
 use tokio::task::JoinHandle;
 
 use crate::camera::Frame;
@@ -101,7 +102,7 @@ pub fn start_camera_server(
             }))
         });
         let server = hyper::Server::bind(&addr).serve(make_svc);
-        println!("Serving on http://{}", server.local_addr());
+        info!("Serving on http://{}", server.local_addr());
         server.await.unwrap();
     })
 }

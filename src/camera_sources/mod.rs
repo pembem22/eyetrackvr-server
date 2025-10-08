@@ -15,20 +15,20 @@ pub trait CameraSource {
 }
 
 #[derive(Clone, Debug)]
-struct FpsCounter {
+pub struct FpsCounter {
     last_second: SystemTime,
     frames_since_last_second: u32,
 }
 
 impl FpsCounter {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             last_second: SystemTime::now(),
             frames_since_last_second: 0,
         }
     }
 
-    fn update_fps(&mut self) {
+    pub fn update_fps(&mut self) {
         let now = SystemTime::now();
         if now.duration_since(self.last_second).unwrap().as_secs() > 0 {
             println!("FPS: {}", self.frames_since_last_second);
