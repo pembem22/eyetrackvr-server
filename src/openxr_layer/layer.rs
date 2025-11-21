@@ -287,21 +287,21 @@ impl OpenXRLayer {
         swapchain: *mut xr_sys::Swapchain,
     ) -> xr_sys::Result {
         unsafe {
-            println!("create_info: {:?}", *create_info);
+            debug!("create_swapchain: {:?}", *create_info);
 
             let next = (*create_info).next;
             if !next.is_null() {
                 let next = next as *const BaseInStructure;
-                println!("{next:?}");
+                debug!("{next:?}");
                 if (*next).ty == xr_sys::StructureType::ANDROID_SURFACE_SWAPCHAIN_CREATE_INFO_FB {
                     let next = next as *const xr_sys::AndroidSurfaceSwapchainCreateInfoFB;
-                    println!("{next:?}");
+                    debug!("{next:?}");
                 }
             }
 
             let result = self.create_swapchain.unwrap()(session, create_info, swapchain);
 
-            println!("swapchain: {:?}", *swapchain);
+            debug!("created swapchain: {:?}", *swapchain);
 
             result
         }
@@ -514,7 +514,7 @@ impl OpenXRLayer {
         while !property_ptr.is_null() {
             let property = unsafe { &mut *property_ptr };
 
-            println!("--> get_system_properties {property:#?}");
+            debug!("--> get_system_properties {property:#?}");
 
             // Process the properties.
             match property.ty {
@@ -569,7 +569,7 @@ impl OpenXRLayer {
         let result =
             unsafe { self.get_system_properties.unwrap()(instance, system_id, properties) };
         if result != xr_sys::Result::SUCCESS {
-            println!("get_system_properties result: {result:?}");
+            debug!("get_system_properties result: {result:?}");
             return result;
         }
 
@@ -613,18 +613,7 @@ impl OpenXRLayer {
             .path_to_string(suggested_bindings.interaction_profile)
             .unwrap();
 
-        println!(
-            "suggest_interaction_profile_bindings {:?} {}",
-            suggested_bindings, interaction_profile
-        );
-
-        if interaction_profile != "/interaction_profiles/ext/eye_gaze_interaction" {
-            return unsafe {
-                self.suggest_interaction_profile_bindings.unwrap()(instance, suggested_bindings)
-            };
-        }
-
-        let suggested_bindings = unsafe {
+        let suggested_bindings_slice = unsafe {
             std::slice::from_raw_parts(
                 suggested_bindings.suggested_bindings,
                 suggested_bindings
@@ -634,17 +623,33 @@ impl OpenXRLayer {
             )
         };
 
-        for suggested_binding in suggested_bindings {
+        debug!("suggest_interaction_profile_bindings {interaction_profile}");
+        for suggested_binding in suggested_bindings_slice {
+            debug!(
+                "{:?} -> {}",
+                suggested_binding.action,
+                xr_instance
+                    .path_to_string(suggested_binding.binding)
+                    .unwrap()
+            );
+        }
+
+        if interaction_profile != "/interaction_profiles/ext/eye_gaze_interaction" {
+            return unsafe {
+                self.suggest_interaction_profile_bindings.unwrap()(instance, suggested_bindings)
+            };
+        }
+
+        debug!("eye gaze interaction profile is being suggested");
+
+        for suggested_binding in suggested_bindings_slice {
             let binding = xr_instance
                 .path_to_string(suggested_binding.binding)
                 .unwrap();
-            println!("suggest_interaction_profile_bindings binding path {binding}");
+            debug!("binding path {binding}");
             if binding == "/user/eyes_ext/input/gaze_ext/pose" {
                 self.eye_gaze_action = Some(suggested_binding.action);
-                println!(
-                    "suggest_interaction_profile_bindings saved eye gaze action {:?}",
-                    suggested_binding.action
-                );
+                debug!("saved eye gaze action {:?}", suggested_binding.action);
 
                 assert_eq!(
                     self.possible_spaces
@@ -658,7 +663,7 @@ impl OpenXRLayer {
                 let gaze_space = *self.possible_spaces
                         .get(&(suggested_binding.action, xr::Path::NULL))
                         .expect("eye tracking interaction profile binding suggested, but no corresponding action space was found");
-                println!("gaze space found {gaze_space:?}");
+                debug!("gaze space found {gaze_space:?}");
 
                 self.eye_gaze_space = Some(gaze_space);
 
