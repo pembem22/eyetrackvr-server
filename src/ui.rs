@@ -1,5 +1,6 @@
 use crate::camera::CAMERA_FRAME_SIZE;
 use crate::camera_texture::CameraTexture;
+use crate::openxr_layer::modules::OpenXRModules;
 use crate::{camera::Frame, structs::EyeGazeState};
 
 #[cfg(feature = "inference")]
@@ -9,9 +10,10 @@ use crate::inference::{
 use crate::structs::{CombinedEyeGazeState, Eye, EyesFrame, EyesGazeState};
 use async_broadcast::Receiver;
 use image::{DynamicImage, ImageBuffer, Rgb, SubImage};
+use imgui::ImColor32;
 
-pub const UI_WINDOW_W: u32 = 960;
-pub const UI_WINDOW_H: u32 = 540;
+pub const UI_WINDOW_W: u32 = 1280;
+pub const UI_WINDOW_H: u32 = 720;
 
 pub struct AppRendererContext {
     pub eyes_cam_rx: Receiver<EyesFrame>,
@@ -123,11 +125,56 @@ impl AppRenderer {
         .unwrap_or(self.filtered_eyes);
     }
 
-    pub(crate) fn render(&self, ui: &imgui::Ui) {
+    pub(crate) fn render(
+        &self,
+        ui: &imgui::Ui,
+        #[cfg(feature = "openxr-api-layer")] openxr_modules: &mut OpenXRModules,
+    ) {
+        // Draw background border.
+        {
+            let draw_list = ui.get_background_draw_list();
+            draw_list
+                .add_rect(
+                    [0.0, 0.0],
+                    [UI_WINDOW_W as f32, UI_WINDOW_H as f32],
+                    ImColor32::from_rgba(0, 0, 0, 128),
+                )
+                .thickness(64.0)
+                .build();
+            draw_list
+                .add_rect(
+                    [0.0, 0.0],
+                    [UI_WINDOW_W as f32, UI_WINDOW_H as f32],
+                    ImColor32::from_rgba(255, 255, 255, 128),
+                )
+                .thickness(32.0)
+                .build();
+        }
+
         self.draw_camera_feeds_window(ui);
 
         #[cfg(feature = "inference")]
         self.draw_inference_window(ui);
+
+        #[cfg(feature = "openxr-api-layer")]
+        self.draw_openxr_modules(ui, openxr_modules);
+
+        // Draw cursor.
+        {
+            const COLOR_INNER: ImColor32 = ImColor32::BLACK;
+            const COLOR_OUTER: ImColor32 = ImColor32::WHITE;
+
+            let draw_list = ui.get_foreground_draw_list();
+            let cursor_screen_pos = ui.io().mouse_pos;
+            draw_list
+                .add_circle(cursor_screen_pos, 3.0, COLOR_OUTER)
+                .filled(true)
+                .build();
+            draw_list
+                .add_circle(cursor_screen_pos, 2.0, COLOR_INNER)
+                .filled(true)
+                .build();
+        }
     }
 
     fn draw_camera_feeds_window(&self, ui: &imgui::Ui) {
@@ -368,5 +415,36 @@ impl AppRenderer {
                 draw_eyelid_state(self.filtered_eyes.r_eyelid);
                 group.end();
             });
+    }
+
+    #[cfg(feature = "openxr-api-layer")]
+    fn draw_openxr_modules(&self, ui: &imgui::Ui, modules: &mut OpenXRModules) {
+        ui.window("OpenXR: META Local Dimming").build(|| {
+            let local_dimming = &mut modules.local_dimming;
+            ui.text("NOTE: This is considered only a hint for the\nruntime and may be completely ignored.");
+            ui.text("Local dimming mode:");
+            // ui.new_line();
+
+            let value_str = match local_dimming.mode {
+                crate::openxr_layer::modules::LocalDimmingMode::DONT_MODIFY => "Don't Modify",
+                crate::openxr_layer::modules::LocalDimmingMode::OVERRIDE_ON => "Override On",
+                crate::openxr_layer::modules::LocalDimmingMode::OVERRIDE_OFF => "Override Off",
+            };
+
+            if let Some(_combo_token) = ui.begin_combo("##local_dimming_combo", value_str) {
+                if ui.selectable("Don't Modify") {
+                    local_dimming.mode =
+                        crate::openxr_layer::modules::LocalDimmingMode::DONT_MODIFY;
+                }
+                if ui.selectable("Override On") {
+                    local_dimming.mode =
+                        crate::openxr_layer::modules::LocalDimmingMode::OVERRIDE_ON;
+                }
+                if ui.selectable("Override Off") {
+                    local_dimming.mode =
+                        crate::openxr_layer::modules::LocalDimmingMode::OVERRIDE_OFF;
+                }
+            }
+        });
     }
 }

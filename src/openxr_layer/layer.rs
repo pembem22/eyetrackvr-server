@@ -19,7 +19,10 @@ use openxr_sys::{
 };
 use quaternion_core as quat;
 
-use crate::openxr_output::OPENXR_OUTPUT_BRIDGE;
+use crate::{
+    openxr_layer::{input::Inputs, modules::OpenXRModules},
+    openxr_output::OPENXR_OUTPUT_BRIDGE,
+};
 
 pub static mut LAYER: Lazy<OpenXRLayer> = Lazy::new(OpenXRLayer::new);
 
@@ -84,9 +87,12 @@ pub struct OpenXRLayer {
     pub session: Option<xr::Session<xr::OpenGlEs>>,
 
     pub get_instance_proc_addr: Option<pfn::GetInstanceProcAddr>,
+
+    pub attach_session_action_sets: Option<pfn::AttachSessionActionSets>,
     pub enumerate_instance_extensions_properties: Option<pfn::EnumerateInstanceExtensionProperties>,
     pub get_system_properties: Option<pfn::GetSystemProperties>,
     pub suggest_interaction_profile_bindings: Option<pfn::SuggestInteractionProfileBindings>,
+    pub create_action: Option<pfn::CreateAction>,
     pub create_action_space: Option<pfn::CreateActionSpace>,
     pub get_action_state_pose: Option<pfn::GetActionStatePose>,
     pub locate_space: Option<pfn::LocateSpace>,
@@ -116,6 +122,10 @@ pub struct OpenXRLayer {
     // See above why not `xr::Action<xr::Posef>`.
     eye_gaze_action: Option<xr_sys::Action>,
     eye_gaze_space: Option<xr_sys::Space>,
+
+    pub inputs: Option<Inputs>,
+
+    pub modules: OpenXRModules,
 }
 
 impl OpenXRLayer {
@@ -125,11 +135,14 @@ impl OpenXRLayer {
             session: None,
 
             get_instance_proc_addr: None,
+
+            attach_session_action_sets: None,
             enumerate_instance_extensions_properties: None,
             get_system_properties: None,
             suggest_interaction_profile_bindings: None,
             eye_gaze_action: None,
             create_action_space: None,
+            create_action: None,
             eye_gaze_space: None,
             get_action_state_pose: None,
             locate_space: None,
@@ -154,6 +167,10 @@ impl OpenXRLayer {
             debug_window_swapchain: None,
 
             view_reference_space: None,
+
+            inputs: None,
+
+            modules: Default::default(),
         }
     }
 
@@ -323,6 +340,41 @@ impl OpenXRLayer {
 
         #[cfg(feature = "gui")]
         {
+            let q = quat::from_euler_angles(
+                quat::RotationType::Extrinsic,
+                quat::RotationSequence::XYZ,
+                [0f32.to_radians(), 0.0, 0.0],
+            );
+
+            let quad_desc = super::raycast::QuadDesc {
+                pose: Posef {
+                    position: Vector3f {
+                        x: 0.0,
+                        y: 0.0,
+                        z: -1.5,
+                    },
+                    orientation: Quaternionf {
+                        w: q.0,
+                        x: q.1[0],
+                        y: q.1[1],
+                        z: q.1[2],
+                    },
+                },
+                size: Extent2Df {
+                    width: 1.6,
+                    height: 0.9,
+                },
+            };
+
+            if let Some(inputs) = self.inputs.as_mut() {
+                inputs.process_inputs(
+                    self.session.as_ref().unwrap(),
+                    quad_desc,
+                    self.view_reference_space.as_ref().unwrap(),
+                    frame_end_info.display_time,
+                );
+            }
+
             use crate::ui::{UI_WINDOW_H, UI_WINDOW_W};
 
             let egl_pointers = self.egl_pointers.as_mut().unwrap();
@@ -372,12 +424,6 @@ impl OpenXRLayer {
 
             swapchain.release_image().unwrap();
 
-            let q = quat::from_euler_angles(
-                quat::RotationType::Extrinsic,
-                quat::RotationSequence::XYZ,
-                [-45f32.to_radians(), 0.0, 0.0],
-            );
-
             let my_layer = Box::new(CompositionLayerQuad {
                 ty: xr_sys::StructureType::COMPOSITION_LAYER_QUAD,
                 next: ptr::null(),
@@ -388,23 +434,8 @@ impl OpenXRLayer {
                     .as_ref()
                     .expect("view reference space is not initialized")
                     .as_raw(),
-                pose: Posef {
-                    position: Vector3f {
-                        x: 0.0,
-                        y: -0.10,
-                        z: -0.20,
-                    },
-                    orientation: Quaternionf {
-                        w: q.0,
-                        x: q.1[0],
-                        y: q.1[1],
-                        z: q.1[2],
-                    },
-                },
-                size: Extent2Df {
-                    width: 0.16,
-                    height: 0.09,
-                },
+                pose: quad_desc.pose,
+                size: quad_desc.size,
                 sub_image: SwapchainSubImage {
                     swapchain: self.debug_window_swapchain.as_ref().unwrap().as_raw(),
                     image_rect: Rect2Di {
@@ -427,6 +458,36 @@ impl OpenXRLayer {
 
         frame_end_info.layers = layers.as_ptr();
         frame_end_info.layer_count = layers.len() as u32;
+
+        // Local dimming
+        {
+            let mut frame_end_attachment_ptr = frame_end_info.next as *mut xr_sys::BaseOutStructure;
+            while !frame_end_attachment_ptr.is_null() {
+                let attachement = unsafe { &mut *frame_end_attachment_ptr };
+
+                match attachement.ty {
+                    xr_sys::StructureType::LOCAL_DIMMING_FRAME_END_INFO_META => {
+                        let attachement = unsafe {
+                            &mut *(frame_end_attachment_ptr
+                                as *mut xr_sys::LocalDimmingFrameEndInfoMETA)
+                        };
+                        match self.modules.local_dimming.mode {
+                            crate::openxr_layer::modules::LocalDimmingMode::OVERRIDE_ON => {
+                                attachement.local_dimming_mode = xr_sys::LocalDimmingModeMETA::ON
+                            }
+                            crate::openxr_layer::modules::LocalDimmingMode::OVERRIDE_OFF => {
+                                attachement.local_dimming_mode = xr_sys::LocalDimmingModeMETA::OFF
+                            }
+                            crate::openxr_layer::modules::LocalDimmingMode::DONT_MODIFY => (),
+                        }
+                    }
+
+                    _ => {}
+                }
+
+                frame_end_attachment_ptr = attachement.next;
+            }
+        }
 
         assert_eq!(
             unsafe { self.end_frame.unwrap()(session, &frame_end_info) },
@@ -672,6 +733,207 @@ impl OpenXRLayer {
         }
 
         xr_sys::Result::SUCCESS
+    }
+
+    pub unsafe fn attach_session_action_sets(
+        &mut self,
+        _session: xr_sys::Session,
+        attach_info: *const xr_sys::SessionActionSetsAttachInfo,
+    ) -> xr_sys::Result {
+        // Assuming only one session.
+        let session = self.session.clone().unwrap();
+        let instance = self.instance.as_ref().unwrap();
+
+        let action_set = instance.create_action_set("overlay", "Overlay", 0).unwrap(); // Assuming underlying app's priorities are also 0.        
+
+        let lr_subactions = [
+            instance.string_to_path("/user/hand/left").unwrap(),
+            instance.string_to_path("/user/hand/right").unwrap(),
+        ];
+
+        let click_action = action_set
+            .create_action::<f32>("click", "Click", &lr_subactions)
+            .unwrap();
+        let grip_action = action_set
+            .create_action::<f32>("grip", "Grip", &lr_subactions)
+            .unwrap();
+        let pose_action = action_set
+            .create_action::<xr::Posef>("hand_pose", "Hand Pose", &lr_subactions)
+            .unwrap();
+        let vibrate_action = action_set
+            .create_action::<xr::Haptic>("vibrate_hand", "Vibrate Hand", &lr_subactions)
+            .unwrap();
+
+        info!("Suggesting overlay bindings");
+
+        let bindings = [
+            xr::Binding::new(
+                &click_action,
+                instance
+                    .string_to_path("/user/hand/left/input/trigger/value")
+                    .unwrap(),
+            ),
+            xr::Binding::new(
+                &click_action,
+                instance
+                    .string_to_path("/user/hand/right/input/trigger/value")
+                    .unwrap(),
+            ),
+            xr::Binding::new(
+                &grip_action,
+                instance
+                    .string_to_path("/user/hand/left/input/squeeze/value")
+                    .unwrap(),
+            ),
+            xr::Binding::new(
+                &grip_action,
+                instance
+                    .string_to_path("/user/hand/right/input/squeeze/value")
+                    .unwrap(),
+            ),
+            xr::Binding::new(
+                &pose_action,
+                instance
+                    .string_to_path("/user/hand/left/input/aim/pose")
+                    .unwrap(),
+            ),
+            xr::Binding::new(
+                &pose_action,
+                instance
+                    .string_to_path("/user/hand/right/input/aim/pose")
+                    .unwrap(),
+            ),
+            xr::Binding::new(
+                &vibrate_action,
+                instance
+                    .string_to_path("/user/hand/left/output/haptic")
+                    .unwrap(),
+            ),
+            xr::Binding::new(
+                &vibrate_action,
+                instance
+                    .string_to_path("/user/hand/right/output/haptic")
+                    .unwrap(),
+            ),
+        ];
+
+        let info = xr_sys::InteractionProfileSuggestedBinding {
+            ty: xr_sys::InteractionProfileSuggestedBinding::TYPE,
+            next: ptr::null(),
+            interaction_profile: instance
+                .string_to_path("/interaction_profiles/facebook/touch_controller_pro")
+                .unwrap(),
+            count_suggested_bindings: bindings.len() as u32,
+            suggested_bindings: bindings.as_ptr() as *const _ as _,
+        };
+
+        assert_eq!(
+            self.suggest_interaction_profile_bindings(instance.as_raw(), &info),
+            xr_sys::Result::SUCCESS,
+            "failed to suggest interaction profile bindings"
+        );
+
+        // instance
+        //     .suggest_interaction_profile_bindings(
+        //         ,
+        //         &,
+        //     )
+        //     .unwrap();
+
+        let hand_spaces = [
+            pose_action
+                .create_space(session.clone(), lr_subactions[0], xr::Posef::IDENTITY)
+                .unwrap(),
+            pose_action
+                .create_space(session.clone(), lr_subactions[1], xr::Posef::IDENTITY)
+                .unwrap(),
+        ];
+
+        let mut attach_info = *attach_info;
+
+        let action_sets = std::slice::from_raw_parts(
+            attach_info.action_sets,
+            attach_info.count_action_sets as usize,
+        );
+
+        let mut action_sets_vec = Vec::new();
+        action_sets_vec.reserve_exact(action_sets.len() + 1);
+        action_sets_vec.extend_from_slice(action_sets);
+        action_sets_vec.push(action_set.as_raw());
+
+        attach_info.action_sets = action_sets_vec.as_ptr();
+        attach_info.count_action_sets = action_sets_vec.len() as u32;
+
+        assert_eq!(
+            self.attach_session_action_sets.unwrap()(session.as_raw(), &attach_info),
+            xr_sys::Result::SUCCESS,
+            "failed to attach action sets"
+        );
+
+        info!("Attached custom action set");
+
+        self.inputs = Some(Inputs {
+            action_set,
+            hand_spaces,
+            lr_subactions,
+
+            click_action,
+            grip_action,
+            pose_action,
+            vibrate_action,
+
+            input_state: Default::default(),
+
+            events: Vec::new(),
+        });
+
+        xr_sys::Result::SUCCESS
+    }
+
+    pub unsafe fn create_action(
+        &mut self,
+        action_set: xr_sys::ActionSet,
+        create_info: *const xr_sys::ActionCreateInfo,
+        action: *mut xr_sys::Action,
+    ) -> xr_sys::Result {
+        struct ActionCreateInfoWrapper(xr_sys::ActionCreateInfo);
+
+        impl std::fmt::Debug for ActionCreateInfoWrapper {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                // Convert fixed-size [c_char; N] to &CStr safely (stop at NUL)
+                fn c_array_to_str(arr: &[c_char]) -> &str {
+                    // Safety: array is always valid as bytes; we just search for NUL
+                    let nul_pos = arr.iter().position(|&c| c == 0).unwrap_or(arr.len());
+                    let slice = &arr[..nul_pos];
+                    let bytes = unsafe {
+                        std::slice::from_raw_parts(slice.as_ptr() as *const u8, slice.len())
+                    };
+                    std::str::from_utf8(bytes).unwrap_or("<invalid utf8>")
+                }
+
+                let this = &self.0;
+
+                f.debug_struct("ActionCreateInfo")
+                    .field("ty", &this.ty)
+                    .field("next", &this.next)
+                    .field("action_name", &c_array_to_str(&this.action_name))
+                    .field("action_type", &this.action_type)
+                    .field("count_subaction_paths", &this.count_subaction_paths)
+                    .field("subaction_paths", &this.subaction_paths)
+                    .field(
+                        "localized_action_name",
+                        &c_array_to_str(&this.localized_action_name),
+                    )
+                    .finish()
+            }
+        }
+
+        let res = self.create_action.unwrap()(action_set, create_info, action);
+
+        debug!("create_action {action_set:?}");
+        debug!("{:#?}", ActionCreateInfoWrapper(*create_info));
+        debug!("=> {:?}", *action);
+        res
     }
 
     pub unsafe fn create_action_space(

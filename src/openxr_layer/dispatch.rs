@@ -13,6 +13,9 @@ use openxr::SystemId;
 use openxr::Time;
 use openxr::{self as xr};
 
+use openxr_sys::Action;
+use openxr_sys::ActionCreateInfo;
+use openxr_sys::ActionSet;
 use openxr_sys::ActionSpaceCreateInfo;
 use openxr_sys::ActionStateGetInfo;
 use openxr_sys::ActionStatePose;
@@ -30,6 +33,7 @@ use openxr_sys::FrameEndInfo;
 use openxr_sys::InteractionProfileSuggestedBinding;
 use openxr_sys::LoaderInitInfoBaseHeaderKHR;
 use openxr_sys::Session;
+use openxr_sys::SessionActionSetsAttachInfo;
 use openxr_sys::SessionCreateInfo;
 use openxr_sys::Space;
 use openxr_sys::SpaceLocation;
@@ -369,6 +373,27 @@ pub unsafe extern "system" fn xr_get_instance_proc_addr(
             ));
         }
 
+        if api_name == "xrAttachSessionActionSets" {
+            layer.attach_session_action_sets = Some(std::mem::transmute::<
+                pfn::VoidFunction,
+                pfn::AttachSessionActionSets,
+            >((*function).unwrap()));
+            *function = Some(std::mem::transmute::<
+                pfn::AttachSessionActionSets,
+                pfn::VoidFunction,
+            >(xr_attach_session_action_sets));
+        }
+
+        if api_name == "xrCreateAction" {
+            layer.create_action = Some(std::mem::transmute::<
+                pfn::VoidFunction,
+                pfn::CreateAction,
+            >((*function).unwrap()));
+            *function = Some(std::mem::transmute::<pfn::CreateAction, pfn::VoidFunction>(
+                xr_create_action,
+            ));
+        }
+
         // XR_FB_face_tracking2
 
         if api_name == "xrCreateFaceTracker2FB" {
@@ -508,6 +533,21 @@ unsafe extern "system" fn xr_locate_space(
     location: *mut SpaceLocation,
 ) -> Result {
     unsafe { LAYER.locate_space(space, base_space, time, location) }
+}
+
+unsafe extern "system" fn xr_attach_session_action_sets(
+    session: Session,
+    attach_info: *const SessionActionSetsAttachInfo,
+) -> Result {
+    unsafe { LAYER.attach_session_action_sets(session, attach_info) }
+}
+
+unsafe extern "system" fn xr_create_action(
+    action_set: ActionSet,
+    create_info: *const ActionCreateInfo,
+    action: *mut Action,
+) -> Result {
+    unsafe { LAYER.create_action(action_set, create_info, action) }
 }
 
 unsafe extern "system" fn xr_create_face_tracker2(

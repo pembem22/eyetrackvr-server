@@ -2,10 +2,14 @@ use core::ffi::c_void;
 use std::{ffi::c_char, ptr, time::Instant};
 
 use glow::HasContext;
+use log::debug;
 use pollster::block_on;
 
 use crate::{
-    openxr_layer::layer::{EGLPointers, LAYER},
+    openxr_layer::{
+        input::UiEvent,
+        layer::{EGLPointers, LAYER},
+    },
     ui::{AppRenderer, AppRendererContext, UI_WINDOW_H, UI_WINDOW_W},
 };
 
@@ -172,19 +176,43 @@ impl RenderContext {
 
     fn render(&mut self) {
         let imgui = &mut self.imgui;
+        let io = imgui.context.io_mut();
+
+        // Handle events from OpenXR inputs.
+        unsafe {
+            if let Some(inputs) = &LAYER.inputs {
+                for event in &inputs.events {
+                    debug!("{:?}", event);
+                    match event {
+                        UiEvent::PointerMove { x, y } => {
+                            io.add_mouse_pos_event([
+                                x * UI_WINDOW_W as f32,
+                                y * UI_WINDOW_H as f32,
+                            ]);
+                        }
+
+                        UiEvent::PointerButton { down } => {
+                            io.add_mouse_button_event(imgui::MouseButton::Left, *down);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Render the frame.
 
         let now = Instant::now();
-        imgui
-            .context
-            .io_mut()
-            .update_delta_time(now - imgui.last_frame);
+        io.update_delta_time(now - imgui.last_frame);
         imgui.last_frame = now;
 
         let ui = imgui.context.frame();
 
         let renderer = &mut self.renderer;
         renderer.update(&mut self.renderer_ctx, &self.queue, &mut imgui.renderer);
-        renderer.render(ui);
+        unsafe {
+            let openxr_layers = &mut LAYER.modules;
+            renderer.render(ui, openxr_layers);
+        }
 
         let mut encoder: wgpu::CommandEncoder = self
             .device
