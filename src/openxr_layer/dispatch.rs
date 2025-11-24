@@ -4,6 +4,7 @@
 use std::ffi::CStr;
 use std::ffi::c_char;
 
+use crate::openxr_layer::EXT_META_boundary_visibility::META_BOUNDARY_VISIBILITY_EXTENSION_NAME;
 use crate::openxr_layer::layer::ADVERTISED_EXTENSIONS;
 use crate::openxr_layer::layer::LAYER;
 
@@ -13,6 +14,7 @@ use openxr::SystemId;
 use openxr::Time;
 use openxr::{self as xr};
 
+use openxr::{self as xr_sys};
 use openxr_sys::Action;
 use openxr_sys::ActionCreateInfo;
 use openxr_sys::ActionSet;
@@ -151,9 +153,18 @@ pub unsafe extern "system" fn xr_create_api_layer_instance(
             .map(|cstr| cstr.as_ptr())
             .collect();
 
+        // For adding more extensions.
+        let mut extensions = filtered_extensions;
+
+        // Request the boundary visibility extension.
+        extensions.push(META_BOUNDARY_VISIBILITY_EXTENSION_NAME.as_ptr());
+
+        // Request the passthrough extension.
+        extensions.push(xr_sys::sys::FB_PASSTHROUGH_EXTENSION_NAME.as_ptr());
+
         // Replace with a filtered list of extensions.
-        chain_instance_create_info.enabled_extension_names = filtered_extensions.as_ptr();
-        chain_instance_create_info.enabled_extension_count = filtered_extensions.len() as u32;
+        chain_instance_create_info.enabled_extension_names = extensions.as_ptr();
+        chain_instance_create_info.enabled_extension_count = extensions.len() as u32;
 
         let api_layer_info = *api_layer_info_ptr;
         let mut chain_api_layer_info = api_layer_info;
@@ -174,11 +185,14 @@ pub unsafe extern "system" fn xr_create_api_layer_instance(
 
         let get_instance_proc_addr = (*api_layer_info.next_info).next_get_instance_proc_addr;
 
+        let mut extension_set = xr::ExtensionSet::default();
+        extension_set.fb_passthrough = true;
+
         let entry = xr::Entry::from_get_instance_proc_addr(get_instance_proc_addr).unwrap();
         let instance = xr::Instance::from_raw(
             entry.clone(),
             *instance,
-            xr::InstanceExtensions::load(&entry, *instance, &xr::ExtensionSet::default()).unwrap(),
+            xr::InstanceExtensions::load(&entry, *instance, &extension_set).unwrap(),
         )
         .unwrap();
 

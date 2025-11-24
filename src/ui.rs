@@ -421,9 +421,9 @@ impl AppRenderer {
     fn draw_openxr_modules(&self, ui: &imgui::Ui, modules: &mut OpenXRModules) {
         ui.window("OpenXR: META Local Dimming").build(|| {
             let local_dimming = &mut modules.local_dimming;
+            
             ui.text("NOTE: This is considered only a hint for the\nruntime and may be completely ignored.");
             ui.text("Local dimming mode:");
-            // ui.new_line();
 
             let value_str = match local_dimming.mode {
                 crate::openxr_layer::modules::LocalDimmingMode::DONT_MODIFY => "Don't Modify",
@@ -444,6 +444,22 @@ impl AppRenderer {
                     local_dimming.mode =
                         crate::openxr_layer::modules::LocalDimmingMode::OVERRIDE_OFF;
                 }
+            }
+        });
+        
+        ui.window("OpenXR: META Boundary Visibility").build(|| {
+            use crate::openxr_layer::modules::BoundaryVisibilityStatus;
+            let boundary_visibility = &mut modules.boundary_visibility;
+            
+            ui.text(format!("Boundary visibility is reported as: {}supported.", if !boundary_visibility.supported_by_runtime { "not " } else { "" }));
+            ui.text(format!("Status: {:?}.", boundary_visibility.status));
+            
+            if ui.button("Request Visible") {
+                boundary_visibility.status = BoundaryVisibilityStatus::TO_REQUEST_VISIBILITY_NOT_SUPPRESSED;
+            }
+            ui.same_line();
+            if ui.button("Request Hidden") {
+                boundary_visibility.status = BoundaryVisibilityStatus::TO_REQUEST_VISIBILITY_SUPPRESSED;
             }
         });
     }

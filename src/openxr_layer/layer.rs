@@ -1,26 +1,36 @@
 use std::{
     any::Any,
     collections::HashMap,
-    ffi::{c_char, c_void},
+    ffi::{CString, c_char, c_void},
     ptr,
     sync::{Condvar, Mutex},
 };
 
 use log::{debug, info, trace};
 use once_cell::sync::Lazy;
-use openxr::{self as xr, FaceConfidence2FB, FaceExpression2FB};
+use openxr::{
+    self as xr, FaceConfidence2FB, FaceExpression2FB, PassthroughFlagsFB,
+    PassthroughLayerPurposeFB, StructureType,
+};
 use openxr_sys::{
-    self as xr_sys, BaseInStructure, CompositionLayerBaseHeader, CompositionLayerFlags,
-    CompositionLayerQuad, Extent2Df, Extent2Di, EyeVisibility, FrameBeginInfo, FrameEndInfo,
-    GraphicsBindingOpenGLESAndroidKHR, GraphicsBindingVulkanKHR, LoaderInitInfoAndroidKHR,
-    LoaderInitInfoBaseHeaderKHR, Offset2Di, Posef, Quaternionf, Rect2Di, SessionCreateInfo,
-    SwapchainCreateFlags, SwapchainCreateInfo, SwapchainSubImage, SwapchainUsageFlags, Vector3f,
-    pfn,
+    self as xr_sys, BaseInStructure, BaseOutStructure, CompositionLayerBaseHeader,
+    CompositionLayerFlags, CompositionLayerQuad, Extent2Df, Extent2Di, EyeVisibility,
+    FrameBeginInfo, FrameEndInfo, GraphicsBindingOpenGLESAndroidKHR, GraphicsBindingVulkanKHR,
+    LoaderInitInfoAndroidKHR, LoaderInitInfoBaseHeaderKHR, Offset2Di, Posef, Quaternionf, Rect2Di,
+    SessionCreateInfo, SwapchainCreateFlags, SwapchainCreateInfo, SwapchainSubImage,
+    SwapchainUsageFlags, Vector3f, pfn,
 };
 use quaternion_core as quat;
 
 use crate::{
-    openxr_layer::{input::Inputs, modules::OpenXRModules},
+    openxr_layer::{
+        EXT_META_boundary_visibility::{
+            BoundaryVisibilityMETA, SystemBoundaryVisibilityPropertiesMETA,
+            pfn::RequestBoundaryVisibilityMETA,
+        },
+        input::Inputs,
+        modules::{BoundaryVisibilityStatus, OpenXRModules},
+    },
     openxr_output::OPENXR_OUTPUT_BRIDGE,
 };
 
@@ -126,6 +136,8 @@ pub struct OpenXRLayer {
     pub inputs: Option<Inputs>,
 
     pub modules: OpenXRModules,
+
+    request_boundary_visibility: Option<RequestBoundaryVisibilityMETA>,
 }
 
 impl OpenXRLayer {
@@ -171,6 +183,8 @@ impl OpenXRLayer {
             inputs: None,
 
             modules: Default::default(),
+
+            request_boundary_visibility: None,
         }
     }
 
@@ -205,6 +219,38 @@ impl OpenXRLayer {
                 .create_reference_space(xr::ReferenceSpaceType::VIEW, xr::Posef::IDENTITY)
                 .expect("failed to create view reference space"),
         );
+
+        // Boundary visibility.
+        unsafe {
+            let fn_name = CString::new("xrRequestBoundaryVisibilityMETA").unwrap();
+            let mut fn_result = Option::<pfn::VoidFunction>::None;
+            self.get_instance_proc_addr.unwrap()(
+                self.instance.clone().unwrap().as_raw(),
+                fn_name.as_ptr(),
+                &mut fn_result,
+            );
+            if let Some(request_boundary_visibility) = fn_result {
+                self.request_boundary_visibility =
+                    Some(std::mem::transmute::<
+                        pfn::VoidFunction,
+                        RequestBoundaryVisibilityMETA,
+                    >(request_boundary_visibility));
+            }
+        }
+
+        // Passthrough
+        {
+            let session = self.session.clone().unwrap();
+            let passthrough = session
+                .create_passthrough(PassthroughFlagsFB::EMPTY)
+                .unwrap();
+            // passthrough.
+            let passthrough_layer = session.create_passthrough_layer(
+                &passthrough,
+                PassthroughFlagsFB::EMPTY,
+                PassthroughLayerPurposeFB::PROJECTED,
+            ).unwrap();
+        }
     }
 
     pub unsafe fn create_session(
@@ -489,6 +535,31 @@ impl OpenXRLayer {
             }
         }
 
+        // Boundary visibility.
+        // Doesn't have to be exactly here, but this way it will be
+        // executed as soon after the UI input as possible.
+        if let Some(request_boundary_visibility) = self.request_boundary_visibility {
+            match self.modules.boundary_visibility.status {
+                BoundaryVisibilityStatus::TO_REQUEST_VISIBILITY_NOT_SUPPRESSED => {
+                    request_boundary_visibility(
+                        session,
+                        BoundaryVisibilityMETA::BOUNDARY_VISIBILITY_NOT_SUPPRESSED,
+                    );
+                    self.modules.boundary_visibility.status =
+                        BoundaryVisibilityStatus::REQUESTED_VISIBILITY_NOT_SUPPRESSED;
+                }
+                BoundaryVisibilityStatus::TO_REQUEST_VISIBILITY_SUPPRESSED => {
+                    request_boundary_visibility(
+                        session,
+                        BoundaryVisibilityMETA::BOUNDARY_VISIBILITY_SUPPRESSED,
+                    );
+                    self.modules.boundary_visibility.status =
+                        BoundaryVisibilityStatus::REQUESTED_VISIBILITY_SUPPRESSED;
+                }
+                _ => {}
+            }
+        }
+
         assert_eq!(
             unsafe { self.end_frame.unwrap()(session, &frame_end_info) },
             xr_sys::Result::SUCCESS
@@ -627,6 +698,32 @@ impl OpenXRLayer {
             property_ptr = property.next;
         }
 
+        // TODO: this needs to be split into multiple layers/modules architecture at this point.
+        // Add request for boundary visibility support.
+        {
+            let mut sys_boundary_visibility_props = SystemBoundaryVisibilityPropertiesMETA {
+                ty: SystemBoundaryVisibilityPropertiesMETA::get_type(),
+                next: ptr::null_mut(),
+                supports_boundary_visibility: false.into(),
+            };
+            (*prev_property_ptr).next = (&mut sys_boundary_visibility_props
+                as *mut SystemBoundaryVisibilityPropertiesMETA)
+                as *mut BaseOutStructure;
+        }
+
+        // Add request for passthrough support.
+        {
+            let mut sys_passthrough_props = xr_sys::SystemPassthroughPropertiesFB {
+                ty: xr_sys::SystemPassthroughPropertiesFB::TYPE,
+                next: ptr::null_mut(),
+                supports_passthrough: false.into(),
+            };
+            (*prev_property_ptr).next = (&mut sys_passthrough_props
+                as *mut xr_sys::SystemPassthroughPropertiesFB)
+                as *mut BaseOutStructure;
+        }
+
+        // Call the runtime.
         let result =
             unsafe { self.get_system_properties.unwrap()(instance, system_id, properties) };
         if result != xr_sys::Result::SUCCESS {
@@ -635,7 +732,7 @@ impl OpenXRLayer {
         }
 
         // Find the end of the chain.
-        let mut prev_property_ptr = ptr::null_mut::<xr_sys::BaseOutStructure>();
+        let mut prev_property_ptr = ptr::null_mut();
         let mut property_ptr = properties as *mut xr_sys::BaseOutStructure;
         while !property_ptr.is_null() {
             let property = unsafe { &mut *property_ptr };
@@ -655,6 +752,33 @@ impl OpenXRLayer {
             unsafe {
                 (*prev_property_ptr).next = ptr::null_mut();
             }
+        }
+
+        // Find the boundary visibility & passthrough support result.
+        let mut property_ptr = properties as *mut xr_sys::BaseOutStructure;
+        while !property_ptr.is_null() {
+            let property: &mut BaseOutStructure = unsafe { &mut *property_ptr };
+            match property.ty.into_raw() {
+                // I don't like how this looks, sad you can't expand an enum.
+                crate::openxr_layer::EXT_META_boundary_visibility::TYPE_SYSTEM_BOUNDARY_VISIBILITY_PROPERTIES_META => {
+                    let property = unsafe {
+                        &*(property_ptr as *mut SystemBoundaryVisibilityPropertiesMETA)
+                    };
+                    LAYER.modules.boundary_visibility.supported_by_runtime = property.supports_boundary_visibility.into();
+                    break;
+                }
+                // Even worse ugh
+                1000118000 /* xr_sys::StructureType::SYSTEM_PASSTHROUGH_PROPERTIES_FB */ => {
+                    let property = unsafe {
+                        &*(property_ptr as *mut SystemBoundaryVisibilityPropertiesMETA)
+                    };
+                    LAYER.modules.boundary_visibility.supported_by_runtime = property.supports_boundary_visibility.into();
+                    break;
+                }
+
+                _ => {}
+            }
+            property_ptr = property.next;
         }
 
         println!("<-- get_system_properties");
